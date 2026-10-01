@@ -1,0 +1,27 @@
+# Runtime dependencies (what the Docker image installs).
+# Versions are pinned exactly so local, CI and Docker builds are reproducible.
+
+# --- Web API ---
+fastapi==0.142.2
+uvicorn[standard]==0.54.0
+python-multipart==0.0.32        # multipart/form-data uploads (voice audio)
+httpx==0.28.1
+
+# --- Configuration & validation ---
+pydantic==2.13.5
+pydantic-settings==2.15.0
+
+# --- Database ---
+SQLAlchemy[asyncio]==2.1.1
+asyncpg==0.31.0                 # async PostgreSQL driver
+alembic==1.20.0                 # schema migrations
+pgvector==0.5.0                 # SQLAlchemy type for the pgvector extension (RAG, phase 4)
+
+# --- AI / agent ---
+openai==3.22.1                  # chat, embeddings, speech-to-text, text-to-speech
+langgraph==1.2.12               # agent workflow graph
+mcp==2.2.0                      # Model Context Protocol server + client
+numpy==2.5.3                    # used by pgvector; pinned for reproducible builds
+
+# --- Security ---
+PyJWT==2.15.1                   # signed tokens for mock login and agent -> MCP identity

@@ -1,0 +1,83 @@
+[project]
+name = "bankai"
+version = "0.1.0"
+description = "Agentic banking voice assistant & LLM evaluation platform (portfolio prototype, MOCK data only)"
+requires-python = ">=3.12"
+# Dependencies are pinned in requirements.txt / requirements-dev.txt.
+
+# ---------------------------------------------------------------- ruff -----
+[tool.ruff]
+line-length = 110
+target-version = "py312"
+extend-exclude = [".venv"]
+
+[tool.ruff.lint]
+select = [
+    "E", "W",   # pycodestyle
+    "F",        # pyflakes
+    "I",        # import sorting
+    "B",        # bugbear: likely bugs
+    "UP",       # pyupgrade: modern syntax
+    "SIM",      # simplifications
+    "ASYNC",    # async pitfalls (blocking calls in async code)
+    "DTZ",      # naive datetimes (time zone bugs are costly in banking)
+    "S",        # bandit: security smells
+    "RUF",
+]
+ignore = [
+    "S311",     # `random` is fine for MOCK data generation (not cryptography)
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101", "S105", "S106"]   # asserts and dummy secrets are expected in tests
+"alembic/versions/*" = ["E501"]          # generated CHECK constraints are long one-liners
+"app/agents/rules.py" = ["E501"]         # regex tables read better unbroken
+
+[tool.ruff.lint.isort]
+known-first-party = ["app", "scripts", "tests"]
+# The local alembic/ folder holds migrations; the import is the third-party package.
+known-third-party = ["alembic"]
+
+# ---------------------------------------------------------------- mypy -----
+[tool.mypy]
+python_version = "3.12"
+files = ["app", "scripts"]
+strict = true
+warn_unreachable = true
+pretty = true
+
+[[tool.mypy.overrides]]
+module = ["pgvector.*"]
+ignore_missing_imports = true   # pgvector ships no type hints
+
+# -------------------------------------------------------------- pytest -----
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+addopts = "-ra --strict-markers --strict-config"
+markers = [
+    "postgres: needs a real PostgreSQL database (TEST_DATABASE_URL)",
+    "llm: calls a real LLM API and costs money (needs OPENAI_API_KEY)",
+]
+filterwarnings = [
+    "error",
+    # SQLite stores NUMERIC as floating point; PostgreSQL (the real target) does not.
+    # Exact-decimal behaviour is covered by the PostgreSQL integration tests.
+    "ignore:Dialect sqlite\\+aiosqlite does \\*not\\* support Decimal objects natively:sqlalchemy.exc.SAWarning",
+]
+
+# ------------------------------------------------------------ coverage -----
+[tool.coverage.run]
+source = ["app", "scripts"]
+# SQLAlchemy async runs DB callbacks inside greenlets; without this coverage misses them.
+concurrency = ["thread", "greenlet"]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false
+exclude_also = [
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+]
