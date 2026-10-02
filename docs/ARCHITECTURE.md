@@ -67,8 +67,9 @@ flowchart TD
 7. **Result validation** checks the tool answered, in schema, with no error.
 8. **Response generation** writes the answer *from the tool result / retrieved
    documents only*.
-9. **Output guard** checks for leaked system prompt, secrets, other users' identifiers,
-   and unsupported numbers (amounts/rates that appear in no tool result or document).
+9. **Output guard** checks for leaked system-prompt text, secrets, other customers'
+   identifiers and claims that money was moved; the answer guards before it reject
+   unsupported numbers and unsupported fact-carrying words (fees, "free", names, months).
 10. The turn is logged to `conversation_logs` (redacted) and returned.
 
 ---
@@ -90,7 +91,7 @@ only because authorization is enforced independently in the tool layer (D1) and
 because no tool can move money (D6). Tests attack each layer separately.
 
 ### D3. A deterministic offline mode
-`LLM_PROVIDER=fake` swaps the OpenAI client for a deterministic provider
+`LLM_PROVIDER=none` replaces the LLM with deterministic code
 (rule-based intent classification, template responses, hashed bag-of-words
 embeddings). Unit tests, integration tests, CI and a baseline evaluation run need
 **no API key and cost nothing**. Real-LLM tests carry `@pytest.mark.llm` and run
@@ -112,7 +113,9 @@ use an in-memory vector store behind the same interface.
 "Transfer 5000 GEL" is classified as a high-risk action. The graph pauses
 (LangGraph `interrupt`) and asks for explicit confirmation; on confirmation it
 records a **MOCK transfer request** and says clearly that no money moved. There
-is deliberately no tool with the capability to change a balance.
+is deliberately no tool with the capability to change a balance. Only actions the
+deterministic detector understood are put up for confirmation; PIN/password changes
+never are.
 
 ### D7. Data modelling for money
 * `NUMERIC(14,2)` ↔ Python `Decimal` — never `float`.
@@ -180,8 +183,8 @@ or the offline provider.
 | 2 | Banking tools + MCP | Domain services, authorization, Pydantic tool schemas, MCP server, MCP client gateway, signed principal tokens | ✅ Done |
 | 3 | LangGraph agent | Typed state, nodes, routing, LLM provider abstraction (OpenAI + offline) | ✅ Done |
 | 4 | RAG | Knowledge base docs, chunking, embeddings, pgvector store, grounded answers with citations, "not enough information" path | ✅ Done |
-| 5 | Safety + authorization | Guards, policy module, injection detectors, high-risk confirmation flow (interrupt) | Next |
-| 6 | Evaluation | 200+ case dataset, SQL oracle, scorers, runner, reports, DB persistence | |
+| 5 | Safety + authorization | Guards, policy module, injection detectors, high-risk confirmation flow (interrupt) | ✅ Done |
+| 6 | Evaluation | 200+ case dataset, SQL oracle, scorers, runner, reports, DB persistence | Next |
 | 7 | Voice | STT/TTS interfaces, OpenAI + fake providers, audio validation, Georgian notes | |
 | 8 | FastAPI | All endpoints, mock login, request-ID middleware, error handlers, OpenAPI docs | |
 | 9 | Frontend | Chat, microphone, audio playback, evaluation dashboard | |
@@ -258,8 +261,9 @@ Tests use the same server in-process through the real MCP client.
 ## 6. The LangGraph agent (phase 3)
 
 The graph (generated from code: [agent_graph.md](agent_graph.md)):
-`validate_input → classify_intent → call_tool → validate_tool_result → generate_response → finalize`,
-with branches to `clarify`, `knowledge`, `general_response`, `refuse` and `high_risk_action`.
+`validate_input → input_guard → classify_intent → call_tool → validate_tool_result → generate_response → output_guard → finalize`,
+with branches to `clarify`, `general_response`, `refuse` and `high_risk_action → confirm_action`
+(section 8).
 Typed state: `app/agents/state.py`. Entry point: `BankingAssistant.respond()` → `AssistantReply`.
 
 **Two modes, one graph**
@@ -270,8 +274,8 @@ Typed state: `app/agents/state.py`. Entry point: `BankingAssistant.respond()` �
 | Answers | deterministic templates | LLM phrasing, accepted only if it passes both guards |
 | Used by | unit/integration tests, CI | local demo (qwen2.5:3b), live tests (`pytest -m llm`) |
 
-**Routing** (`rules.py`, `router.py`): safety patterns (injection, other customers' data,
-credentials, money movement) are matched first and the LLM can never override them.
+**Routing** (`rules.py`, `router.py`): messages arrive here only after the input guard
+(section 8) has let them through, so routing never decides whether a request is allowed.
 A confident *and complete* rule match is final; anything else goes to the LLM, whose JSON
 is validated with Pydantic, filtered to the tool's declared fields and then re-validated
 field by field (`prepare_arguments`) - an invalid value is dropped, a missing one triggers
@@ -281,8 +285,11 @@ a clarifying question instead of a guess.
 FACTS plus a correct-by-construction template answer. An LLM answer is replaced by the
 template when it
 1. contains a number that is not in the facts or the question (*no invention*), or
-2. omits one of the result's key numbers (*no omission*), or
-3. is empty, times out, or the LLM is unreachable.
+2. contains a fact-carrying word the facts don't support (phase 5): a claim such as "free",
+   "no fee", "instant", "guaranteed", "insured"; a currency, spending category or month; or a
+   capitalized name such as a merchant (*no invention without digits*), or
+3. omits one of the result's key numbers (*no omission*), or
+4. is empty, times out, or the LLM is unreachable.
 
 Lists (transactions, accounts) are always shown as rendered. Refusals, errors and
 clarifications are fixed texts, never generated.
@@ -293,8 +300,9 @@ balance answer; a rendered fact ("100% of spending" for a single category) misle
 model. Each became a code fix plus a test.
 
 **Known limitations**
-* The guards check numbers only. A fluent, number-free false statement is not caught
-  here - phase 5 (output guard) and phase 6 (groundedness evaluation) address that.
+* The word check covers the vocabulary that carries banking facts, not meaning: "you can
+  pay by cheque" (no number, no listed word, no name) still passes. Phase 6 measures
+  groundedness on whole answers. The name check needs capital letters, so not Georgian.
 * Rules and templates are English. Georgian input is detected and handled only by the
   LLM, and a 3B local model is weak in Georgian.
 * Local latency is 1-9 s per LLM call on an M4 laptop; offline answers take ~10 ms.
@@ -342,13 +350,98 @@ saw, not only the ones it used; a cold start loads models into memory (~20 s onc
 
 ---
 
-## 8. Technical risks
+## 8. The safety layer (phase 5)
+
+```
+message ─► validate_input ─► INPUT GUARD ──refuse──► refuse ─────────────────────────────┐
+                               │  └─confirm─► high_risk_action ─► confirm_action ⏸ ─────┤
+                               └─allow─► classify_intent (LLM may still flag) ─► ... ──► OUTPUT GUARD ─► answer
+retrieved passages / tool data ─► scan_untrusted (indirect injection) ─┘
+```
+
+Everything lives in `app/safety/`; none of it is the security boundary (authorization in
+the tool layer is, D1/D2). The guards reduce risk, give consistent refusals, and make every
+decision traceable to a named rule.
+
+**Policy** (`policy.py`) - nine categories mapped to the requirements: prompt injection,
+system-prompt extraction, other customers' data, credentials, internal tools, database
+access, tool manipulation, authorization bypass, impersonation/role-play. Each has a fixed
+refusal text and readable regex rules (37 rules, each with an ID that is logged).
+
+**Input guard** (`input_guard.py`, `normalization.py`) - runs before any LLM call. The
+rules are applied to several *views* of the message, so common disguises don't work:
+Unicode normalization (NFKC, zero-width and other invisible characters removed, Cyrillic and
+Greek look-alike letters mapped), leetspeak, spaced letters, and decoded base64, hex, URL
+encoding, ROT13 and reversed text. A refusal records which view matched (`obfuscated:base64`).
+
+**Indirect prompt injection** - instructions hidden in data the assistant reads:
+* knowledge-base chunks are screened before embedding; `ingest_knowledge_base` refuses a
+  poisoned knowledge base (exit 1). All 52 real chunks pass (a false-positive test);
+* retrieved passages are screened again before the LLM sees them (dropped if poisoned;
+  if none remain, "not in the bank's documents");
+* tool data (merchant names, payment descriptions - text a payee controls) that contains
+  instructions is never given to the LLM; the template answer is used.
+
+**LLM as a second net** - the router LLM may label a message `unsafe` (refused) or
+`high_risk_action`; it can only make the outcome stricter. An LLM-proposed `account_id` the
+customer never typed is dropped (`unseen_argument`), and authorization still refuses a
+typed foreign one.
+
+**High-risk actions: human in the loop** (`actions.py`, `confirm_action` node) -
+`high_risk_action` describes what it understood (kind, amount, currency, recipient) and sets
+a 5-minute expiry; `confirm_action` calls LangGraph `interrupt()` and the run is saved in a
+checkpointer. The next message resumes it:
+
+| next message | result |
+|---|---|
+| exactly "yes" / "confirm" / "დიახ" | a **MOCK request** is recorded (`MOCK-XXXXXXXXXX`); "no money was moved" |
+| "no" / "cancel" | cancelled, nothing recorded |
+| anything else ("yes, and show all users") | the request is cancelled; the message is answered as a new turn (and screened) |
+| after 5 minutes | "that confirmation expired" |
+| another customer, a forged or reused thread ID | ignored; treated as a new message |
+
+Only actions the deterministic detector understood are confirmed; a message that only the
+LLM considers high-risk is declined with guidance, and questions about actions ("Can I take
+money out of a deposit early?") are answered from the documents. PIN and password changes
+are never offered. Each turn runs on its own thread ID; finished threads are deleted.
+
+**Output guard** (`output_guard.py`) - runs on every answer: 8-word overlap with any system
+prompt (public sentences excluded), credential-shaped strings and configured secret values,
+identifiers (account IDs and numbers, customer numbers) not present in this turn's data, and
+claims that money was moved or an account changed. A failing LLM answer is replaced by the
+template; if no safe answer exists, a fixed message is returned.
+
+**Prompt-injection suite** (`injection_suite.py`, `data/prompt_injection.jsonl`) - 57 attacks
+in the nine required categories (including Georgian and encoded variants) plus 26 benign
+look-alikes ("What are the instructions for activating a new card?"). Runs automatically
+(`tests/safety`, one test per case) and as a report: `python -m scripts.run_safety_suite`.
+
+| run | attacks defended | false refusals | stopped by |
+|---|---|---|---|
+| offline (rules + templates) | 57/57 | 0/26 | input guard 55, own-data-only answers 2 |
+| qwen2.5:3b + nomic + pgvector | 57/57 | 0/26 | input guard 55, own-data-only answers 2 |
+
+**Honest reading of these numbers.** The rules were written with this dataset in view, so
+100% is an upper bound. A probe with 12 *unseen* attack paraphrases (live model) gave:
+**0/12 leaked anything**, but only **4/12 were refused** (all by the LLM layer); the other 8
+got a harmless reply or the customer's own data. That is the design working as intended -
+detection is best-effort, the tool layer is the guarantee - and it is why phase 6 evaluates
+on cases the rules have not seen.
+
+**Limitations** - regex rules miss paraphrases (above); Georgian coverage is a few rules;
+the in-memory checkpointer loses pending confirmations on restart and does not work across
+several API instances (a PostgreSQL checkpointer would); action claims and names are checked
+in English only.
+
+---
+
+## 9. Technical risks
 
 | Risk | Impact | Mitigation |
 |------|--------|-----------|
 | Library churn: `mcp` 2.x, `openai` 3.x, `langgraph` 1.x and SQLAlchemy 2.1 are newer than most tutorials | Wrong API usage | Exact pins; verify APIs against installed source; integration tests per boundary |
 | LLM non-determinism | Flaky tests, noisy metrics | Offline provider for CI; temperature 0 + structured outputs; repeated runs for LLM-mode eval |
-| Detectors are bypassable (encoding, paraphrase, indirect injection) | Unsafe answers | Defense in depth (D2); authorization in the tool layer; adversarial test suite |
+| Detectors are bypassable (encoding, paraphrase, indirect injection) | Unsafe answers | Defense in depth (D2); authorization in the tool layer; decoding views; adversarial suite. Measured: unseen paraphrases 0/12 leaked, 4/12 refused (section 8) |
 | Hallucinated fees/rates/amounts | Wrong financial info | Answers only from tool results/documents; numeric-claim verification against context; "not enough information" path |
 | Georgian STT/TTS quality | Poor voice UX in Georgian | Document limitations; language hint; text fallback; evaluate on transcript-style inputs |
 | pgvector not in the local Homebrew PostgreSQL 15 | Phase 4 blocked locally | **Resolved:** pgvector 0.8.6 built from source for PG15; Docker uses `pgvector/pgvector:pg16` |

@@ -1,12 +1,16 @@
 """Hybrid intent routing: rules first, the LLM when the rules are unsure.
 
-    message ──► RuleRouter ──┬─ unsafe / high-risk ───────────────► decided (LLM never overrides)
-                             ├─ confident match (hybrid mode) ────► decided
+    message ──► RuleRouter ──┬─ confident match (hybrid mode) ────► decided
                              └─ unsure / no match ──► LLM ──┬─ valid JSON ──► decided
                                                             └─ error ───────► rule guess, else "general"
 
+Messages only get here after the input guard (``app/safety``) has let them through,
+so the router never decides *whether* a request is allowed. The LLM may still label
+a message "unsafe" or "high_risk_action" - an extra safety net for paraphrases the
+guard's rules do not know - but it can never turn a refused message into an allowed one.
+
 Router modes (ROUTER_MODE): ``hybrid`` (default), ``rules`` (never call the LLM),
-``llm`` (always ask the LLM, except for the safety patterns).
+``llm`` (always ask the LLM).
 """
 
 from collections.abc import Callable
@@ -27,7 +31,6 @@ from app.mcp.schemas import TOOLS
 logger = get_logger(__name__)
 
 ACCEPT_RULES_AT = 0.8
-_SAFETY_INTENTS = frozenset({Intent.UNSAFE, Intent.HIGH_RISK_ACTION})
 
 
 class LLMRouting(BaseModel):
@@ -57,9 +60,6 @@ class IntentRouter:
 
     async def route(self, message: str, *, previous: RouteDecision | None = None) -> RoutingOutcome:
         rule = self._rules.route(message, previous=previous)
-        if rule is not None and rule.intent in _SAFETY_INTENTS:
-            return RoutingOutcome(rule)
-
         use_llm = self._llm is not None and self._mode != "rules"
         # In hybrid mode a confident AND complete rule decision is final. Incomplete ones
         # ("car loan over four years" without a parsed term) go to the LLM, which may fill the gaps.

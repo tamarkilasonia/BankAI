@@ -52,6 +52,13 @@ async def main(argv: list[str] | None = None) -> int:
 
     state = "indexed" if report.changed else "already up to date"
     print(f"{report.chunks} chunks from {report.documents} documents {state} (embedder: {report.embedder}).")
+    if report.rejected:
+        print(
+            f"REJECTED {len(report.rejected)} chunk(s) containing instructions aimed at the assistant: "
+            + ", ".join(report.rejected),
+            file=sys.stderr,
+        )
+        return 1
     return 0
 
 

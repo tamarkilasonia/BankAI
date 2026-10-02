@@ -32,6 +32,8 @@ ignore = [
 "tests/**" = ["S101", "S105", "S106"]   # asserts and dummy secrets are expected in tests
 "alembic/versions/*" = ["E501"]          # generated CHECK constraints are long one-liners
 "app/agents/rules.py" = ["E501"]         # regex tables read better unbroken
+"app/safety/policy.py" = ["E501"]        # (same)
+"app/safety/actions.py" = ["E501"]       # (same)
 
 [tool.ruff.lint.isort]
 known-first-party = ["app", "scripts", "tests"]
