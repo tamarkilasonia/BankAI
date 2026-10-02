@@ -183,7 +183,9 @@ NUMBER_WORDS = {
 _COUNT = r"(\d{1,3}|" + "|".join(sorted(NUMBER_WORDS, key=len, reverse=True)) + ")"
 _TERM_MONTHS = re.compile(rf"\b{_COUNT}\s*(months?|mos?)\b")
 _TERM_YEARS = re.compile(rf"\b{_COUNT}\s*(years?|yrs?)\b")
-_LIMIT = re.compile(r"\b(last|latest|recent|top)\s+(\d{1,3})\b")
+_LIMIT = re.compile(
+    r"\b(last|latest|recent|top)\s+(\d{1,3})\b(?!\s*(days?|weeks?|months?|years?)\b)"
+)  # not "last 7 days"
 _MERCHANT = re.compile(
     r"\b(?:at|from|paid to|payments to)\s+([a-z0-9][\w'&.-]*(?:\s+[a-z0-9][\w'&.-]*){0,3})"
 )

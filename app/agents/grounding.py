@@ -82,7 +82,7 @@ CLAIMS: dict[str, re.Pattern[str]] = {
 }
 _MONTH_NUMBERS = {number: name.lower() for number, name in enumerate(calendar.month_name) if name}
 _MONTH_WORDS = [name for name in _MONTH_NUMBERS.values() if name != "may"]  # "may" is usually a verb
-_ISO_DATE = re.compile(r"\b\d{4}-(\d{2})-\d{2}\b")
+_ISO_DATE = re.compile(r"\b\d{4}-(\d{2})-\d{2}(?!\d)")  # also inside timestamps (2026-08-12T10:00)
 _WORDS = re.compile(r"[a-z0-9]+")
 _CAPITALIZED = re.compile(r"(?<![\w-])[A-Z][A-Za-z0-9&]*(?:'s)?")
 _SENTENCE_START = re.compile(r"(^|[.!?:]\s+|\n\s*([-*•]|\d+[.)])?\s*)$")
@@ -103,6 +103,7 @@ COMMON_WORDS = frozenset(
     account accounts available balance balances bank banking card cards checking current customer
     date details exchange fee fees information interest loan loans main monthly mortgage payment
     payments period rate rates savings spending summary transaction transactions
+    biggest largest highest lowest smallest top latest recent showing
     bankai mock ok
     """.split()  # noqa: SIM905
 )

@@ -184,8 +184,8 @@ or the offline provider.
 | 3 | LangGraph agent | Typed state, nodes, routing, LLM provider abstraction (OpenAI + offline) | ✅ Done |
 | 4 | RAG | Knowledge base docs, chunking, embeddings, pgvector store, grounded answers with citations, "not enough information" path | ✅ Done |
 | 5 | Safety + authorization | Guards, policy module, injection detectors, high-risk confirmation flow (interrupt) | ✅ Done |
-| 6 | Evaluation | 200+ case dataset, SQL oracle, scorers, runner, reports, DB persistence | Next |
-| 7 | Voice | STT/TTS interfaces, OpenAI + fake providers, audio validation, Georgian notes | |
+| 6 | Evaluation | 200+ case dataset, SQL oracle, scorers, runner, reports, DB persistence | ✅ Done |
+| 7 | Voice | STT/TTS interfaces, OpenAI + fake providers, audio validation, Georgian notes | Next |
 | 8 | FastAPI | All endpoints, mock login, request-ID middleware, error handlers, OpenAPI docs | |
 | 9 | Frontend | Chat, microphone, audio playback, evaluation dashboard | |
 | 10 | Testing | Fill gaps: security suite, voice, end-to-end; ≥80% coverage | |
@@ -435,7 +435,96 @@ in English only.
 
 ---
 
-## 9. Technical risks
+## 9. Evaluation (phase 6)
+
+```
+banking_eval.jsonl ─► runner ─► agent on a FROZEN mock bank (fixed date) ─► reply ─┐
+        │                                                                          ├─► scorers ─► metrics ─► report
+        └─► SQL oracle on the same frozen bank (hand-written SQL) ─► expected ─────┘        └─► evaluation_runs/_results
+```
+
+**Dataset** (`app/evaluation/datasets/banking_eval.jsonl`, 246 cases): ACCOUNT 27,
+TRANSACTION 31, SPENDING 28, CALCULATION 24 (exchange rates, loans), RAG 33, GENERAL 16,
+SAFETY 22, PROMPT_INJECTION 25, AUTHORIZATION 20, VOICE 20 (transcript-style: no
+punctuation, fillers, spoken numbers, ASR errors, Georgian). Each case states the input,
+customer, expected intent, tool, arguments, behavior and answer characteristics. Cases
+are written as the *correct* behavior, not what the system happens to do; tags mark
+`paraphrase`, `follow_up`, `holdout` (attacks never seen while writing the guard's rules),
+`spoken_numbers`, `asr_error`, `georgian`.
+
+**Ground truth is computed, not typed** (D9). An expected value is a query - "restaurant
+spending of CUST-0001 this month" - answered at run time by `SqlOracle` with its own
+hand-written SQL, its own loan formula and its own copy of the MOCK rate table. Tests prove
+the oracle, the services (through MCP) and plain Python over the seed data agree, and
+mutation checks prove those tests fail when the oracle is wrong. Document facts ("0.20%")
+are checked against the cited document by a test, so the dataset cannot drift from the
+knowledge base.
+
+**Frozen bank.** Every run uses a fresh in-memory database seeded with a fixed anchor
+(2026-09-28) and the agent's clock pinned to it, so runs are comparable over time and on
+any machine. Runs are stored with the dataset's content hash and the model name.
+
+**Metrics** (`scoring.py`, `metrics.py`) - deterministic checks, each with numerator and
+denominator stored:
+
+| Metric | How it is computed |
+|---|---|
+| Answer accuracy | right behavior AND every oracle value / required text / cited source in the answer |
+| Answer relevance | right intent, not a generic fallback, topic words present |
+| Intent / tool / argument accuracy | exact intent; exact tool (or none); expected arguments ⊆ actual (numbers and case normalized) |
+| Groundedness | every number and fact-carrying word in the answer is in the tool result, documents or question |
+| Hallucination rate | unbacked number or word, a claim that money moved, or an answer where the documents had none |
+| Safety pass rate | SAFETY cases passed |
+| Prompt-injection defense / detection | attacks that achieved nothing / attacks explicitly refused |
+| Authorization pass rate, data isolation | AUTHORIZATION cases passed; replies (all 246) without another customer's data |
+| Latency | average, p50, p95 per reply |
+
+No LLM-as-judge: a 3B local judge is unreliable and non-deterministic, while exact checks
+are stricter and reproducible on a labelled dataset. A judge calibrated against human
+labels is the documented next step for open-ended answers.
+
+**Results** (`python -m scripts.run_evaluation`; full reports in [docs/evaluation/](evaluation/)):
+
+| | offline (rules + templates) | qwen2.5:3b + nomic-embed-text |
+|---|---|---|
+| **Cases passed** | **74.0%** (182/246) | **85.0%** (209/246) |
+| Answer accuracy | 74.4% (183/246) | 85.4% (210/246) |
+| Answer relevance | 79.3% (142/179) | 91.1% (163/179) |
+| Intent accuracy | 81.6% (164/201) | 92.5% (186/201) |
+| Tool selection accuracy | 81.3% (200/246) | 89.8% (221/246) |
+| Tool argument accuracy | 82.1% (78/95) | 93.7% (89/95) |
+| Groundedness | 100.0% (187/187) | 100.0% (179/179) |
+| Hallucination rate (lower is better) | 0.5% (1/187) | 0.6% (1/179) |
+| Safety pass rate | 90.9% (20/22) | 100.0% (22/22) |
+| Prompt-injection defense | 100.0% (25/25) | 100.0% (25/25) |
+| Prompt-injection detection | 52.0% (13/25) | 72.0% (18/25) |
+| Authorization pass rate | 65.0% (13/20) | 65.0% (13/20) |
+| Data isolation | 100.0% (246/246) | 100.0% (246/246) |
+| Average latency (p95) | 0.01 s (0.01 s) | 0.71 s (2.41 s) |
+| LLM-written answers | 0.0% | 37.4% |
+
+By category (passed): ACCOUNT 23→26/27, TRANSACTION 26→29/31, SPENDING 26→26/28, CALCULATION 20→23/24, RAG 14→22/33, GENERAL 15→15/16, SAFETY 20→22/22, PROMPT_INJECTION 13→18/25, AUTHORIZATION 13→13/20, VOICE 12→15/20 (offline→LLM).
+
+Prompt-injection detection: attacks also in the injection suite 12/12 in both modes; the 13 `holdout` attacks 1/13 offline and 6/13 with the LLM. Defense (nothing leaked, nothing executed) is 25/25 in both modes. Latency is measured on an Apple M4 laptop with Ollama.
+
+**What the evaluation found** - and was fixed, each with a regression test:
+1. dates inside timestamps (`2026-08-12T10:00`) were not recognized by the grounding check;
+2. a template word ("Biggest") was taken for an invented name;
+3. "transaction history for the last 7 days" set a list limit of 7 instead of a period;
+4. LLM-phrased exchange-rate answers dropped the "MOCK rate" disclaimer (now appended by
+   code, like sources) - a requirement of the project, invisible without an evaluation.
+Two evaluation bugs were fixed as well (relevance demanded the word "balance"; attack cases
+scored the internal refusal label instead of the outcome).
+
+**What it shows** (not fixed on purpose - tuning the agent on its own test set would inflate
+the numbers): the offline rules miss paraphrases, spoken numbers and Georgian; names of other
+customers are not detected (data isolation still holds: the agent answers with the
+customer's own data); the hashing retriever sometimes cites the wrong section; a question
+about a product that does not exist ("student loan") is answered from a similar one.
+
+---
+
+## 10. Technical risks
 
 | Risk | Impact | Mitigation |
 |------|--------|-----------|

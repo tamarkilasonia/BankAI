@@ -114,7 +114,8 @@ def prompt_shingles() -> frozenset[tuple[str, ...]]:
     return frozenset(found)
 
 
-def _claims(text: str) -> list[str]:
+def action_claims(text: str) -> list[str]:
+    """Sentences claiming that money was moved or an account changed (negations excluded)."""
     lowered = text.lower()
     found = []
     for pattern in _ACTION_CLAIMS:
@@ -144,6 +145,6 @@ class OutputGuard:
                 if match.group(0).lower() not in known:
                     findings.append(OutputFinding("foreign_identifier", name))
                     break
-        for claim in _claims(response):
+        for claim in action_claims(response):
             findings.append(OutputFinding("action_claim", claim))
         return findings

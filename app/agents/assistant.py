@@ -23,7 +23,7 @@ deleted; paused ones are kept until they are answered or go stale.
 
 import time
 import uuid
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Any
@@ -40,6 +40,7 @@ from app.agents.nodes import AgentConfig, AgentDeps, AgentNodes
 from app.agents.state import AgentState
 from app.core.config import Settings
 from app.core.logging import get_logger, request_id_var
+from app.core.time import utcnow
 from app.llm import LLMClient, create_llm_client
 from app.mcp.client import MCPToolGateway
 from app.models.enums import Channel, SafetyStatus
@@ -119,6 +120,7 @@ class BankingAssistant:
         gateway: MCPToolGateway,
         llm: LLMClient | None = None,
         extra_secrets: Sequence[str] = (),
+        clock: Callable[[], datetime] | None = None,
     ) -> "BankingAssistant":
         config = AgentConfig(
             router_mode=settings.router_mode,
@@ -137,6 +139,7 @@ class BankingAssistant:
                 llm=llm or create_llm_client(settings),
                 config=config,
                 output_guard=OutputGuard(secrets),
+                clock=clock or utcnow,
             )
         )
 

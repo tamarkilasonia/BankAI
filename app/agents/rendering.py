@@ -44,6 +44,9 @@ class Rendered:
     prompt_kind: str = "facts"
     # Where the information came from; appended to knowledge answers by code, not by the LLM.
     sources: tuple[str, ...] = ()
+    # A sentence every answer must carry (e.g. "MOCK rate, not a real market rate"). The template
+    # contains it; an LLM answer gets it appended by code if the LLM left it out.
+    disclaimer: str | None = None
 
 
 def money(amount: Decimal, currency: str) -> str:
@@ -186,9 +189,12 @@ def render_exchange_rate(result: ExchangeRateQuote) -> Rendered:
         conversion = f"{base_amount} = {money(result.converted_amount, result.quote_currency)}"
         facts.append(f"Conversion: {conversion}")
         answer += f" {conversion}."
-    answer += f" This is a MOCK illustrative rate (as of {result.as_of.isoformat()}), not a real market rate."
+    disclaimer = (
+        f"This is a MOCK illustrative rate (as of {result.as_of.isoformat()}), not a real market rate."
+    )
+    answer += f" {disclaimer}"
     key = (result.rate,) if result.converted_amount is None else (result.converted_amount,)
-    return Rendered(facts, answer, key)
+    return Rendered(facts, answer, key, disclaimer=disclaimer)
 
 
 def render_loan(result: LoanPaymentQuote) -> Rendered:
@@ -212,7 +218,9 @@ def render_loan(result: LoanPaymentQuote) -> Rendered:
         f"the estimated monthly payment is {monthly}. "
         f"In total you would repay {total}, of which {interest} is interest. {result.note}"
     )
-    return Rendered(facts, answer, (result.monthly_payment, result.annual_interest_rate_pct))
+    return Rendered(
+        facts, answer, (result.monthly_payment, result.annual_interest_rate_pct), disclaimer=result.note
+    )
 
 
 def render_policy(result: PolicySearchResult) -> Rendered:
