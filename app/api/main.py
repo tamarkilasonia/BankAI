@@ -13,9 +13,14 @@ Request flow::
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import RedirectResponse
+from fastapi.staticfiles import StaticFiles
+from starlette.responses import Response
+from starlette.types import Scope
 
 from app.api.errors import install_error_handlers
 from app.api.middleware import RequestContextMiddleware
@@ -34,9 +39,37 @@ Agentic banking assistant prototype. **All banking data is MOCK data**; no money
    `access_token` as a Bearer token (the **Authorize** button above).
 2. `POST /chat` (text) or `POST /voice/chat` (audio) to talk to the agent.
 
+The web UI is at [/ui/](/ui/).
+
 Errors always look like `{"error": {"code", "message", "request_id"}}`; send the `request_id`
 when reporting a problem. Evaluation endpoints need the `X-Operator-Key` header.
 """
+
+FRONTEND_DIR = Path(__file__).resolve().parents[2] / "frontend"
+
+# The UI page: scripts, styles and requests only from this server; nothing inline, no frames.
+# (Not applied to /docs, which loads Swagger UI from a CDN.)
+FRONTEND_HEADERS = {
+    "Content-Security-Policy": (
+        "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; "
+        "media-src 'self' blob:; connect-src 'self'; object-src 'none'; base-uri 'none'; "
+        "frame-ancestors 'none'; form-action 'self'"
+    ),
+    "Referrer-Policy": "no-referrer",
+    "Permissions-Policy": "microphone=(self), camera=(), geolocation=()",
+    "X-Frame-Options": "DENY",
+    "Cache-Control": "no-cache",
+}
+
+
+class FrontendFiles(StaticFiles):
+    """The static UI, with the security headers above on every file."""
+
+    async def get_response(self, path: str, scope: Scope) -> Response:
+        response = await super().get_response(path, scope)
+        response.headers.update(FRONTEND_HEADERS)
+        return response
+
 
 TAGS = [
     {"name": "auth", "description": "MOCK login: a customer number in, a signed session token out."},
@@ -89,6 +122,13 @@ def create_app(services: Services | None = None) -> FastAPI:
     install_error_handlers(app)
     for module in (auth, chat, voice, banking, evaluations, system):
         app.include_router(module.router)
+    if FRONTEND_DIR.is_dir():
+        app.mount("/ui", FrontendFiles(directory=FRONTEND_DIR, html=True), name="ui")
+
+        @app.get("/", include_in_schema=False)
+        async def home() -> RedirectResponse:
+            return RedirectResponse("/ui/")
+
     return app
 
 

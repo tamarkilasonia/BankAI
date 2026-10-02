@@ -156,7 +156,7 @@ BankAI/
 │   └── core/         Config, structured logging, errors, token signing
 ├── alembic/          Database migrations
 ├── knowledge_base/   MOCK bank policy documents (Markdown) for RAG
-├── frontend/         Static HTML/JS: chat, microphone, evaluation dashboard
+├── frontend/         Static HTML/CSS/JS modules: chat, microphone, evaluation dashboard (served at /ui/)
 ├── scripts/          seed_db, ingest_knowledge_base, run_evaluation
 ├── tests/
 │   ├── unit/         Fast, isolated (SQLite, fakes)
@@ -187,8 +187,8 @@ or the offline provider.
 | 6 | Evaluation | 200+ case dataset, SQL oracle, scorers, runner, reports, DB persistence | ✅ Done |
 | 7 | Voice | STT/TTS interfaces, OpenAI + fake providers, audio validation, Georgian notes | ✅ Done |
 | 8 | FastAPI | All endpoints, mock login, request-ID middleware, error handlers, OpenAPI docs | ✅ Done |
-| 9 | Frontend | Chat, microphone, audio playback, evaluation dashboard | Next |
-| 10 | Testing | Fill gaps: security suite, voice, end-to-end; ≥80% coverage | |
+| 9 | Frontend | Chat, microphone, audio playback, evaluation dashboard | ✅ Done |
+| 10 | Testing | Fill gaps: security suite, voice, end-to-end; ≥80% coverage | Next |
 | 11 | Docker | Dockerfile, compose: backend, mcp-server, db (pgvector), migrate/seed job | |
 | 12 | CI/CD | Lint → type-check → unit → integration (PG service) → coverage → image build | |
 | 13 | Docs | README, architecture diagrams, INTERVIEW.md | |
@@ -637,7 +637,50 @@ the operator key is a shared secret rather than a role in an identity provider.
 
 ---
 
-## 12. Technical risks
+## 12. Web UI (phase 9)
+
+`frontend/` - plain HTML, CSS and JavaScript modules, served by the API at `/ui/` (`/` redirects
+there): no framework, no build step, no npm packages, same origin (no CORS).
+
+* **Chat** - MOCK sign-in (customer picker), message history, text input, a microphone button
+  (MediaRecorder: WebM/Opus in Chrome and Firefox, MP4 in Safari -> `POST /voice/chat`), the spoken
+  answer as an `<audio>` player, "read answers aloud" (`POST /voice/synthesize`), and a speech-language
+  hint (detect / English / Georgian). Voice turns show what was heard and with what confidence - or
+  why it was not acted on. A high-risk request shows a confirmation card (Yes / No). Every answer has
+  a collapsible trace: intent and its source, tool and arguments, LLM or template, safety status and
+  flags, request ID. A side panel shows the customer's own accounts and recent transactions.
+* **Evaluation dashboard** (operator key) - run picker, "run evaluation" (all or one category,
+  polled until done), a hero figure (cases passed) and metric tiles (accuracy, relevance, tool
+  selection, arguments, groundedness, hallucination rate, safety, injection defense and detection,
+  authorization, data isolation, latency with p95), pass rate by category as a single-series bar
+  chart (fixed category order, hover/focus tooltips, the rows double as its table), and the failed
+  cases - input, expected and actual behavior and tool, and every failure reason - filterable by category.
+
+**Security.** Everything shown is untrusted text (answers, transcripts, and evaluation inputs that
+*are* prompt-injection attacks), so it enters the page only through `textContent` - a test fails on
+any HTML-parsing sink (`innerHTML`, `insertAdjacentHTML`, `document.write`, `eval`, ...), and was
+mutation-checked against the sneaky `Object.assign(el, {innerHTML})` form. The UI is served with a
+strict Content-Security-Policy (`script-src 'self'`, no inline scripts or styles, `frame-ancestors
+'none'`), `Permissions-Policy: microphone=(self)` and `Referrer-Policy: no-referrer`; `/docs` is
+left out of that policy because Swagger UI loads from a CDN. Session token and operator key live
+in `sessionStorage` (gone with the tab).
+
+**Tests** (`tests/frontend/`): serving and headers; the injection-sink ban; a contract test that every
+`request(METHOD, path)` in the JavaScript exists in the OpenAPI schema (mutation-checked); every
+element the code looks up exists in the page; `node --check` and `node --test` unit tests for the pure
+helpers; and `ui_smoke.mjs`, an end-to-end run in headless Chrome over the DevTools protocol (no
+npm packages) - sign in, ask, confirm a transfer, an `<img onerror>` attack rendered as text, the
+dashboard - which fails on any JavaScript error or CSP violation. pytest runs it against a live
+uvicorn (marker `ui`, skipped without Chrome). `FAKE_MIC=question.wav` adds a spoken question:
+Chrome plays the WAV as the microphone, and the recording goes through Whisper, the agent and Piper.
+
+**Found by looking at screenshots, not by tests:** two views visible at once (`display: grid` beat
+the `hidden` attribute), category bars in PostgreSQL's JSONB key order, wrapped case IDs. Each was
+fixed; the first is now also covered by the smoke test's per-view checks.
+
+---
+
+## 13. Technical risks
 
 | Risk | Impact | Mitigation |
 |------|--------|-----------|
