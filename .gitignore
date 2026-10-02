@@ -25,3 +25,6 @@ reports/
 .DS_Store
 .idea/
 .vscode/
+
+# Downloaded speech models (large binaries, never committed)
+models/

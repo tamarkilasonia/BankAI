@@ -109,7 +109,52 @@ class Settings(BaseSettings):
     response_mode: Literal["llm", "template"] = "llm"
     max_message_chars: int = Field(default=1000, ge=10, le=20000)
 
-    @field_validator("mcp_auth_secret", "llm_api_key", "embedding_api_key", "rag_min_score", mode="before")
+    # --- Voice ---
+    # Speech-to-text. "none": voice input disabled. "faster_whisper": local Whisper (free,
+    # offline after the model download). "openai_compatible": an OpenAI-style
+    # /audio/transcriptions endpoint (OpenAI itself needs STT_API_KEY).
+    stt_provider: Literal["none", "faster_whisper", "openai_compatible"] = "none"
+    stt_model: str = Field(
+        default="small", description="Whisper size (faster_whisper) or model name (OpenAI)."
+    )
+    stt_model_dir: Path = Path("models/whisper")
+    stt_base_url: str | None = None
+    stt_api_key: SecretStr | None = None
+    stt_prompt: str = Field(
+        default=(
+            "A customer asks a banking assistant about lari (GEL), dollars (USD) and euros (EUR), "
+            "accounts, cards and transfers."
+        ),
+        description="Domain vocabulary hint for the recognizer (fixed 'lari' heard as 'lorry'); '' = none.",
+    )
+    stt_min_confidence: float = Field(
+        default=0.5,
+        ge=0.0,
+        le=1.0,
+        description="Below this transcript confidence the assistant asks to repeat instead of acting.",
+    )
+    # Text-to-speech. "piper": local neural voices (one per language). "openai_compatible":
+    # an OpenAI-style /audio/speech endpoint.
+    tts_provider: Literal["none", "piper", "openai_compatible"] = "none"
+    tts_voices_dir: Path = Path("models/piper")
+    tts_voice_en: str = "en_US-lessac-medium"
+    tts_voice_ka: str = "ka_GE-natia-medium"
+    tts_model: str = Field(default="gpt-4o-mini-tts", description="openai_compatible only")
+    tts_base_url: str | None = None
+    tts_api_key: SecretStr | None = None
+    voice_max_audio_bytes: int = Field(default=10_000_000, ge=1000, le=50_000_000)
+    voice_max_audio_seconds: float = Field(default=60.0, gt=0, le=600)
+    tts_max_chars: int = Field(default=1500, ge=10, le=10000)
+
+    @field_validator(
+        "mcp_auth_secret",
+        "llm_api_key",
+        "embedding_api_key",
+        "rag_min_score",
+        "stt_api_key",
+        "tts_api_key",
+        mode="before",
+    )
     @classmethod
     def _empty_means_unset(cls, value: object) -> object:
         """``KEY=`` in a copied .env.example means "not configured", not "empty secret"."""
