@@ -358,13 +358,22 @@ class AgentNodes:
             }
         else:
             language = state.get("language", "en")
-            if state.get("prompt_kind") == "passages":
+            passages = state.get("prompt_kind") == "passages"
+            if passages:
                 prompt = knowledge_messages(state["message"], facts, language)
             else:
                 prompt = responder_messages(state["message"], facts, language)
             required = [Decimal(n) for n in state.get("key_numbers", [])]
             update = await self._llm_answer(
-                prompt, fallback=template, sources=[*facts, state["message"]], required=required
+                prompt,
+                fallback=template,
+                facts=facts,
+                question=state["message"],
+                # A policy answer states only what the documents state: "Is the fee 0.1%?"
+                # must not let the answer confirm 0.1%. Tool answers may echo the customer's
+                # own amounts ("convert 250 USD"); their key numbers keep them honest.
+                question_numbers=not passages,
+                required=required,
             )
             disclaimer = state.get("disclaimer")
             if update["response_source"] == "llm" and disclaimer and disclaimer not in update["response"]:
@@ -382,7 +391,7 @@ class AgentNodes:
             return {"response": messages.GREETING, "response_source": "template"}
         prompt = general_messages(state["message"], state.get("language", "en"))
         update = await self._llm_answer(
-            prompt, fallback=messages.GREETING, sources=[state["message"], messages.CAPABILITIES]
+            prompt, fallback=messages.GREETING, facts=[messages.CAPABILITIES], question=state["message"]
         )
         return update | {"fallback_response": messages.GREETING}
 
@@ -540,7 +549,9 @@ class AgentNodes:
         prompt: list[ChatMessage],
         *,
         fallback: str,
-        sources: list[str],
+        facts: list[str],
+        question: str,
+        question_numbers: bool = True,
         required: list[Decimal] | None = None,
     ) -> Update:
         """Ask the LLM to phrase the answer; fall back to the template if anything is off."""
@@ -557,10 +568,10 @@ class AgentNodes:
         answer = completion.text.strip()
         if not answer:
             return rejected("llm_empty_answer")
-        if unsupported := unsupported_numbers(answer, *sources):
+        if unsupported := unsupported_numbers(answer, *facts, *([question] if question_numbers else [])):
             logger.warning("agent.ungrounded_answer", extra={"unsupported_numbers": unsupported[:5]})
             return rejected("ungrounded_answer")
-        if unsupported := unsupported_terms(answer, *sources):
+        if unsupported := unsupported_terms(answer, *facts, question=question):
             logger.warning("agent.ungrounded_terms", extra={"unsupported_terms": unsupported[:5]})
             return rejected("ungrounded_terms")
         if missing := missing_numbers(answer, required or []):

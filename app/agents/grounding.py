@@ -12,13 +12,15 @@ payment), and an answer that omits one is also replaced by the template.
 
 The first check is deliberately strict - "about 2,300 GEL" for 2,275.58 GEL fails it.
 Small integers (0-12) are allowed because answers naturally count things
-("your 3 accounts") and name months; that is a known, documented gap.
+("your 3 accounts") and name months - but not as amounts or rates: "10 GEL" and
+"5%" must be in the facts like any other amount.
 
 Not every hallucination is a number. ``unsupported_terms`` applies the same idea
 to words that carry facts in banking answers:
 
 * **claims** - "free", "no fee", "instant", "guaranteed", "insured"... ("international
-  transfers are free" invents a fee without a single digit);
+  transfers are free" invents a fee without a single digit). A claim must be made by one
+  fact sentence about the same subject, and never comes from the customer's question;
 * **currencies, spending categories and months** - "you spent it on shopping in August";
 * **names** - capitalized words such as merchants or products ("your payment at Carrefour").
 
@@ -36,25 +38,34 @@ from app.models.enums import SPENDING_CATEGORIES
 
 _NUMBER = re.compile(r"(?<![\w.])\d[\d,]*(?:\.\d+)?")
 _SMALL_INTEGERS = frozenset(Decimal(n) for n in range(13))
+# A number next to a currency or a percent sign is an amount or a rate, never a count.
+_UNIT_AFTER = re.compile(r"\s?(%|per ?cent\b|(gel|usd|eur|lari|dollars?|euros?)\b|[₾$€])", re.IGNORECASE)
+_UNIT_BEFORE = re.compile(r"(\b(gel|usd|eur)|[₾$€])\s?$", re.IGNORECASE)
 
 
-def _values(text: str) -> list[tuple[str, Decimal]]:
+def _values(text: str) -> list[tuple[str, Decimal, bool]]:
+    """(as written, value, is an amount or rate) for every number in ``text``."""
     found = []
     for match in _NUMBER.finditer(text):
         raw = match.group(0).rstrip(",")
+        amount = bool(_UNIT_AFTER.match(text, match.end()) or _UNIT_BEFORE.search(text, 0, match.start()))
         # The regex only matches digits, commas and one decimal point: always a valid Decimal.
-        found.append((raw, Decimal(raw.replace(",", "")).normalize()))
+        found.append((raw, Decimal(raw.replace(",", "")).normalize(), amount))
     return found
 
 
 def numbers_in(text: str) -> set[Decimal]:
-    return {value for _, value in _values(text)}
+    return {value for _, value, _ in _values(text)}
 
 
 def unsupported_numbers(answer: str, *sources: str) -> list[str]:
-    """Numbers in ``answer`` that none of the ``sources`` contain."""
-    allowed = set().union(*(numbers_in(source) for source in sources)) | _SMALL_INTEGERS
-    return [raw for raw, value in _values(answer) if value not in allowed]
+    """Numbers in ``answer`` that none of the ``sources`` contain (small counts excepted)."""
+    allowed = set().union(*(numbers_in(source) for source in sources))
+    return [
+        raw
+        for raw, value, amount in _values(answer)
+        if value not in allowed and (amount or value not in _SMALL_INTEGERS)
+    ]
 
 
 def missing_numbers(answer: str, required: Iterable[Decimal]) -> list[Decimal]:
@@ -117,15 +128,67 @@ def _months(text: str) -> set[str]:
     return found
 
 
-def unsupported_terms(answer: str, *sources: str) -> list[str]:
-    """Fact-carrying words in ``answer`` that none of the ``sources`` back up."""
-    source = " ".join(sources)
+_SENTENCE_BREAK = re.compile(r"(?<=[.!?])\s+|\n+")
+_HEADER = re.compile(r"^(.{1,100}?):\s")  # "[1] Title - Section: text" or "Total spent: ..."
+
+
+def _stem(word: str) -> str:
+    return word[:-1] if len(word) > 3 and word.endswith("s") else word  # transfers = transfer
+
+
+def _content_words(text: str) -> set[str]:
+    words = _WORDS.findall(text)
+    return {_stem(w) for w in words if len(w) > 2 and not w.isdigit() and w not in COMMON_WORDS}
+
+
+def _fact_sentences(facts: Iterable[str]) -> list[tuple[str, set[str]]]:
+    """Each sentence of the facts with its words, plus the words of its fact's header.
+
+    The header ("International transfers - Compliance checks") says what every sentence
+    of the passage is about, even one that only says "in that case the fee is refunded".
+    """
+    found = []
+    for fact in facts:
+        lowered = fact.lower()
+        header = _HEADER.match(lowered)
+        context = _content_words(header.group(1)) if header else set()
+        found += [(s, _content_words(s) | context) for s in _SENTENCE_BREAK.split(lowered) if s.strip()]
+    return found
+
+
+def unbacked_claims(answer: str, facts: Iterable[str]) -> list[str]:
+    """Claims ("free", "instant", "no fee") that no fact sentence makes about the same subject.
+
+    Matching the word alone is not enough: "Transfers to other BankAI customers are free"
+    must not back up "International transfers are free". So a claim counts only if one fact
+    sentence contains it together with every word of the answer's sentence that the facts
+    know about. Words the facts never use (paraphrases) are ignored. When in doubt the
+    answer is rejected and the template is used - a safe, if less fluent, outcome.
+    """
+    sentences = _fact_sentences(facts)
+    vocabulary = set().union(*(words for _, words in sentences))
+    problems: list[str] = []
+    for sentence in _SENTENCE_BREAK.split(answer.lower()):
+        for name, pattern in CLAIMS.items():
+            if not pattern.search(sentence):
+                continue
+            subject = _content_words(pattern.sub(" ", sentence)) & vocabulary
+            backed = any(pattern.search(text) and subject <= words for text, words in sentences)
+            if not backed and f"claim:{name}" not in problems:
+                problems.append(f"claim:{name}")
+    return problems
+
+
+def unsupported_terms(answer: str, *facts: str, question: str = "") -> list[str]:
+    """Fact-carrying words in ``answer`` that the ``facts`` don't back up.
+
+    The customer's ``question`` may supply currencies, categories, months and names
+    ("do you support EUR savings?") but never a claim: "Are transfers instant?" must not
+    let the answer say they are.
+    """
+    source = " ".join([*facts, question])
     lowered_answer, lowered_source = answer.lower(), source.lower()
-    problems = [
-        f"claim:{name}"
-        for name, pattern in CLAIMS.items()
-        if pattern.search(lowered_answer) and not pattern.search(lowered_source)
-    ]
+    problems = unbacked_claims(answer, facts)
     known_currencies = set(currencies_in(normalize(source)))
     problems += [f"currency:{c}" for c in currencies_in(normalize(answer)) if c not in known_currencies]
     problems += [

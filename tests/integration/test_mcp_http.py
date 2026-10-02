@@ -1,6 +1,7 @@
 """The MCP server over real streamable HTTP, plus transport failure modes."""
 
 import asyncio
+import json
 import runpy
 import socket
 from collections.abc import AsyncIterator
@@ -12,13 +13,17 @@ import pytest
 import uvicorn
 from mcp.server.mcpserver import MCPServer
 
+from app.agents.assistant import BankingAssistant
+from app.agents.nodes import AgentDeps
 from app.core.config import Settings
 from app.mcp import server as server_module
 from app.mcp.client import MCPToolGateway, ToolCallError
 from app.mcp.server import create_http_app
 from app.services.authorization import Principal
 from app.services.schemas import BalanceResult
-from tests.constants import TEST_MCP_SECRET
+from tests.constants import ANCHOR, GIORGI_CHECKING, NINO, TEST_MCP_SECRET
+from tests.fakes import ScriptedLLM
+from tests.oracle import SEED
 
 
 @pytest.fixture
@@ -53,6 +58,27 @@ async def test_tool_call_over_http(http_base_url: str, nino: Principal) -> None:
         isinstance(a.balance, Decimal) for a in result.output.accounts
     )  # survived JSON as exact strings
     assert len(result.output.accounts) == 2
+
+
+async def test_whole_agent_turns_over_http(http_base_url: str) -> None:
+    """LangGraph -> MCP over streamable HTTP -> tool server -> database: the deployed topology."""
+    gateway = MCPToolGateway(f"{http_base_url}/mcp", auth_secret=TEST_MCP_SECRET)
+    checking = next(a for a in SEED.accounts if a.user_id == NINO)
+    bot = BankingAssistant(AgentDeps(gateway=gateway, clock=lambda: ANCHOR))
+
+    reply = await bot.respond(user_id=NINO, message="What's my current balance?")
+
+    assert reply.tool == "get_account_balance" and f"{checking.balance:,.2f} GEL" in reply.response
+    # The principal travels as a signed token in the request metadata; over HTTP the
+    # server still refuses another customer's account, even when the LLM asks for it.
+    route = json.dumps(
+        {"intent": "transactions", "arguments": {"account_id": str(GIORGI_CHECKING)}, "confidence": 0.9}
+    )
+    llm_bot = BankingAssistant(AgentDeps(gateway=gateway, llm=ScriptedLLM(route), clock=lambda: ANCHOR))
+    denied = await llm_bot.respond(user_id=NINO, message=f"anything new on {GIORGI_CHECKING}?")
+
+    assert denied.tool_error == "access_denied" and denied.tool_result is None
+    assert str(GIORGI_CHECKING) not in denied.response
 
 
 async def test_health_endpoint(http_base_url: str) -> None:

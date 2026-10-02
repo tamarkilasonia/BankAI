@@ -20,6 +20,7 @@ os.environ["LLM_API_KEY"] = ""
 os.environ["MCP_AUTH_SECRET"] = "test-only-mcp-secret-0123456789abcdef"
 
 import pytest
+from hypothesis import settings as hypothesis_settings
 from mcp.server.mcpserver import MCPServer
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -41,6 +42,12 @@ from app.services.authorization import Principal
 from tests.constants import ANCHOR, GIORGI, NINO, TEST_MCP_SECRET
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+# Property-based tests (tests/property): no per-example time limit - CI machines vary.
+# HYPOTHESIS_PROFILE=thorough explores 20x more examples (a nightly job, or after a rule change).
+hypothesis_settings.register_profile("default", deadline=None)
+hypothesis_settings.register_profile("thorough", deadline=None, max_examples=2000)
+hypothesis_settings.load_profile(os.getenv("HYPOTHESIS_PROFILE", "default"))
 
 
 @pytest.fixture(autouse=True)

@@ -70,6 +70,15 @@ def test_numbers_from_the_question_and_small_counts_are_allowed() -> None:
     assert unsupported_numbers(answer, "no numbers here", "a loan over 24 months") == []
 
 
+@pytest.mark.parametrize(
+    "answer", ["The minimum fee is 10 GEL.", "The fee is 5%.", "It costs $2.", "That is GEL 3.", "5 percent."]
+)
+def test_small_amounts_and_rates_are_not_counts(answer: str) -> None:
+    """Regression (phase 10): "Is the minimum fee 10 GEL?" -> "Yes, it is 10 GEL" passed as a count."""
+    assert unsupported_numbers(answer, "The fee is 0.20%, minimum 15.00 GEL.")
+    assert unsupported_numbers(answer, f"Facts that do state it: {answer}") == []
+
+
 # --- rendering ----------------------------------------------------------------------------
 
 
@@ -314,9 +323,43 @@ def test_claims_backed_by_the_documents_are_allowed() -> None:
     assert unsupported_terms("Incoming transfers are free and arrive instantly.", passage) == []
 
 
+FEE_PASSAGES = [
+    "[1] International transfers - Fees for international transfers: The fee is 0.20% of the amount.",
+    "[2] Fee schedule - Transfer fees: Transfers between your own accounts and to other BankAI "
+    "customers are free. Transfers to other banks in Georgia cost 0.50 GEL.",
+    "[3] International transfers - Compliance checks: Transfers may be rejected if information is "
+    "missing; in that case the fee is refunded.",
+]
+
+
+def test_a_claim_borrowed_from_another_subject_is_caught() -> None:
+    """Regression (phase 10): "free" from the own-accounts sentence backed "international ... are free"."""
+    assert unsupported_terms("International transfers are free.", *FEE_PASSAGES) == ["claim:free"]
+    assert unsupported_terms("Transfers to other banks are free.", *FEE_PASSAGES) == ["claim:free"]
+
+
+def test_a_claim_the_documents_make_about_the_same_subject_is_allowed() -> None:
+    assert unsupported_terms("Transfers between your own accounts are free.", *FEE_PASSAGES) == []
+    # "in that case" -> the passage header says what the sentence is about
+    assert (
+        unsupported_terms("If an international transfer is rejected, the fee is refunded.", *FEE_PASSAGES)
+        == []
+    )
+    # words the documents never use (paraphrase) don't count against the claim
+    assert unsupported_terms("Sending money to other BankAI customers is free.", *FEE_PASSAGES) == []
+
+
+def test_the_question_cannot_vouch_for_a_claim() -> None:
+    answer = "Yes, international transfers are free."
+    assert unsupported_terms(answer, *FEE_PASSAGES, question="Are international transfers free?") == [
+        "claim:free"
+    ]
+    assert unsupported_terms("Yes, they are instant.", question="Are transfers instant?") == ["claim:instant"]
+
+
 def test_words_from_the_question_and_common_words_are_allowed() -> None:
     answer = "Hello! How can I help with your savings in EUR today? May I suggest checking your balance?"
-    assert unsupported_terms(answer, "do you support EUR savings?") == []
+    assert unsupported_terms(answer, question="do you support EUR savings?") == []
 
 
 def test_sentence_initial_adverbs_are_not_names() -> None:

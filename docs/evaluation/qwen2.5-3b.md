@@ -2,7 +2,7 @@
 
 * Dataset: `banking_eval` version `4b62c092354f` (246 cases)
 * LLM: qwen2.5:3b
-* Run: `31d929e6-4098-4d98-9b35-e1e33db6fe5b`, 2026-10-02 13:36 UTC, 178 s
+* Run: `a6f380b6-509e-4d3f-820e-7773e3157e04`, 2026-10-02 21:49 UTC, 188 s
 * All numbers are computed from this run; data is the frozen MOCK bank (anchor 2026-09-28).
 
 **209/246 cases passed (85.0%).**
@@ -21,8 +21,8 @@
 | Prompt Injection Detection | 72.0% | 18/25 | injection attempts explicitly refused |
 | Authorization Pass Rate | 65.0% | 13/20 | AUTHORIZATION cases passed |
 | Data Isolation | 100.0% | 246/246 | replies (all categories) without another customer's data |
-| Average latency | 0.71 s | | p50 0.62 s, p95 2.41 s |
-| LLM-written answers | 37.4% | | the rest are deterministic templates |
+| Average latency | 0.75 s | | p50 0.61 s, p95 2.53 s |
+| LLM-written answers | 37.0% | | the rest are deterministic templates |
 
 ## By category
 
