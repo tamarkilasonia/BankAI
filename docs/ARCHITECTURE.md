@@ -149,7 +149,7 @@ BankAI/
 │   ├── services/     Domain logic: accounts, transactions, spending, FX, calculator, authorization
 │   ├── rag/          Chunking, embeddings, vector stores (pgvector / in-memory), retriever
 │   ├── safety/       Input/output guards, policy rules, injection detectors
-│   ├── voice/        stt.py, tts.py — provider interfaces, OpenAI + fake providers, audio checks
+│   ├── voice/        stt.py, tts.py — provider interfaces (local Whisper/Piper, OpenAI-compatible), audio checks
 │   ├── evaluation/   Datasets (JSONL), runner, SQL oracle, scorers, report builder
 │   ├── database/     Engine/session, declarative base, mock-data seeding
 │   ├── models/       ORM entities and enums
@@ -185,8 +185,8 @@ or the offline provider.
 | 4 | RAG | Knowledge base docs, chunking, embeddings, pgvector store, grounded answers with citations, "not enough information" path | ✅ Done |
 | 5 | Safety + authorization | Guards, policy module, injection detectors, high-risk confirmation flow (interrupt) | ✅ Done |
 | 6 | Evaluation | 200+ case dataset, SQL oracle, scorers, runner, reports, DB persistence | ✅ Done |
-| 7 | Voice | STT/TTS interfaces, OpenAI + fake providers, audio validation, Georgian notes | Next |
-| 8 | FastAPI | All endpoints, mock login, request-ID middleware, error handlers, OpenAPI docs | |
+| 7 | Voice | STT/TTS interfaces, OpenAI + fake providers, audio validation, Georgian notes | ✅ Done |
+| 8 | FastAPI | All endpoints, mock login, request-ID middleware, error handlers, OpenAPI docs | Next |
 | 9 | Frontend | Chat, microphone, audio playback, evaluation dashboard | |
 | 10 | Testing | Fill gaps: security suite, voice, end-to-end; ≥80% coverage | |
 | 11 | Docker | Dockerfile, compose: backend, mcp-server, db (pgvector), migrate/seed job | |
@@ -524,7 +524,70 @@ about a product that does not exist ("student loan") is answered from a similar 
 
 ---
 
-## 10. Technical risks
+## 10. Voice (phase 7)
+
+```
+audio ─► validate (bytes, format by magic number, length) ─► STT ─► understood? ─yes─► agent (channel=voice) ─► TTS
+                                                                      └─no─► "please repeat or type" (agent not called) ─► TTS
+```
+
+* **Interfaces** - `SpeechToText.transcribe(audio, language)` and `TextToSpeech.synthesize(text, language)`
+  (`app/voice/stt.py`, `tts.py`); nothing outside `app/voice` knows the provider.
+* **Providers** - local and free by default (no OpenAI key needed): **faster-whisper** (Whisper `small`,
+  int8 on CPU, ~2 s per question on an M4) and **Piper** (`en_US-lessac-medium`, `ka_GE-natia-medium`).
+  OpenAI-compatible providers (`/audio/transcriptions`, `/audio/speech`) are tested against a mocked API.
+  Fakes in `tests/fakes.py` make every test and CI run model-free. The local packages are optional
+  (`requirements-voice.txt`); models are downloaded once (`scripts/download_voice_models.py`) and then
+  loaded with `local_files_only` - at runtime no audio and no request leaves the machine.
+* **Audio checks** - format from the first bytes (WAV, MP3, OGG, WebM, MP4/M4A, FLAC; browsers record
+  WebM/Opus or MP4/AAC - decoding of all three is tested with real models), size limit, length limit
+  (WAV before decoding, others after), damaged files -> `invalid_audio`. Errors have stable codes and
+  customer-facing messages (`app/voice/errors.py`).
+* **Not acting on misheard speech** - the agent is only called when the transcript has words, its
+  confidence (geometric mean of token probabilities) is at least `STT_MIN_CONFIDENCE` (0.5) and the
+  language is English or Georgian. Otherwise: "I didn't catch that clearly, so I haven't done anything",
+  in the language the customer most likely spoke. Spoken money movement still needs the explicit
+  confirmation turn of phase 5 - which also shows back what was understood.
+* **Speakable answers** - no source list, no table separators, "****0001" read as "ending in 0001",
+  long answers cut at a sentence with "the full answer is on your screen". A TTS failure costs the
+  audio, never the answer.
+
+**Measured** (`python -m scripts.evaluate_voice`, report in [docs/evaluation/voice.md](evaluation/voice.md)):
+42 English questions from the evaluation dataset and 12 Georgian banking questions, spoken by Piper and
+transcribed by Whisper `small`. Synthetic speech is cleaner than real callers - an optimistic bound - and
+Piper's synthesis is stochastic, so numbers move a little between runs.
+
+| | English | Georgian |
+|---|---|---|
+| Word error rate | 2.7% | 150% (nothing usable) |
+| Exact transcripts | 36/42 | 0/12 |
+| Transcripts in Georgian script | - | 1/12 (still wrong) |
+| Acted on by the assistant | 42/42 | 0/12 |
+| Acted on although > 25% of words wrong | 1 ("healthcare" heard as "health care") | 0 |
+
+**What the measurements changed** (each a code change with a test):
+1. "lari" was heard as "lorry" in 5 of 5 sentences -> a banking vocabulary prompt for Whisper; English
+   WER fell from 8.8% to 2.7% (after also fixing the WER normalization of apostrophes and number words).
+2. The same prompt made Georgian *dangerous*: unintelligible Georgian came back as the prompt text itself,
+   in English, with confidence ~0.7 - 5 of 12 would have been acted on. Now the prompt is used only when
+   the detected language is English, and a transcript that echoes the prompt counts as nothing heard.
+3. One Georgian question came back as punctuation only -> transcripts without a word are "not understood".
+
+**Georgian - the honest status.** Text in Georgian works (the agent detects it, the LLM answers in
+Georgian, Piper speaks it). Georgian *speech recognition* does not: Whisper `small` writes Georgian in
+Latin, Persian or Armenian letters with low confidence, and `large-v3-turbo` (tried, 1.6 GB, 5x slower)
+mistook Georgian for Persian. The pipeline therefore asks Georgian speakers to repeat or type, instead of
+acting on a guess. A production system would use a recognizer trained on Georgian (e.g. a cloud
+service with `ka-GE` support behind the same `SpeechToText` interface) and evaluate it with this script.
+
+**Limitations** - a confident wrong word ("Khinkali" -> "Kinkali", "spending" -> "Pending") is not
+detectable by confidence; the transcript is shown to the customer (phase 9) and high-risk actions are
+confirmed. One transcription at a time per process (the model is CPU-bound); a real deployment would run
+STT as a separate service with a queue.
+
+---
+
+## 11. Technical risks
 
 | Risk | Impact | Mitigation |
 |------|--------|-----------|
@@ -532,7 +595,7 @@ about a product that does not exist ("student loan") is answered from a similar 
 | LLM non-determinism | Flaky tests, noisy metrics | Offline provider for CI; temperature 0 + structured outputs; repeated runs for LLM-mode eval |
 | Detectors are bypassable (encoding, paraphrase, indirect injection) | Unsafe answers | Defense in depth (D2); authorization in the tool layer; decoding views; adversarial suite. Measured: unseen paraphrases 0/12 leaked, 4/12 refused (section 8) |
 | Hallucinated fees/rates/amounts | Wrong financial info | Answers only from tool results/documents; numeric-claim verification against context; "not enough information" path |
-| Georgian STT/TTS quality | Poor voice UX in Georgian | Document limitations; language hint; text fallback; evaluate on transcript-style inputs |
+| Georgian STT/TTS quality | Poor voice UX in Georgian | **Measured:** Georgian TTS works (Piper), Georgian STT does not (Whisper small/large-v3-turbo); the pipeline never acts on it and asks to repeat or type (section 10) |
 | pgvector not in the local Homebrew PostgreSQL 15 | Phase 4 blocked locally | **Resolved:** pgvector 0.8.6 built from source for PG15; Docker uses `pgvector/pgvector:pg16` |
 | Docker not installed on the development machine | Phase 11 not verifiable locally | Install Docker Desktop / OrbStack; CI builds the image regardless |
 | SQLite (unit) vs PostgreSQL (prod) differences | Bugs hidden in unit tests | PostgreSQL integration tests in CI (`REQUIRE_INTEGRATION_DB=1`) |

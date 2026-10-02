@@ -49,8 +49,8 @@ warn_unreachable = true
 pretty = true
 
 [[tool.mypy.overrides]]
-module = ["pgvector.*"]
-ignore_missing_imports = true   # pgvector ships no type hints
+module = ["pgvector.*", "faster_whisper.*"]
+ignore_missing_imports = true   # these ship no type hints (faster_whisper is optional: requirements-voice.txt)
 
 # -------------------------------------------------------------- pytest -----
 [tool.pytest.ini_options]
@@ -60,7 +60,8 @@ asyncio_default_fixture_loop_scope = "function"
 addopts = "-ra --strict-markers --strict-config"
 markers = [
     "postgres: needs a real PostgreSQL database (TEST_DATABASE_URL)",
-    "llm: calls a real LLM API and costs money (needs OPENAI_API_KEY)",
+    "llm: calls a real LLM server (local Ollama by default); skipped when none is reachable",
+    "voice: runs the local Whisper/Piper models; skipped when they are not installed",
 ]
 filterwarnings = [
     "error",
