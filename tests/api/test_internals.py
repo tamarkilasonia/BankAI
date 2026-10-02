@@ -128,7 +128,7 @@ async def test_api_with_the_mcp_server_over_http_unreachable(
     """The deployment topology (API and MCP server as separate services), with the MCP server down."""
     from sqlalchemy.ext.asyncio import async_sessionmaker
 
-    import app.models  # noqa: F401
+    import app.models
     from app.api.main import create_app
     from app.database.base import Base
     from app.database.seed import seed_database
@@ -148,19 +148,15 @@ async def test_api_with_the_mcp_server_over_http_unreachable(
     monkeypatch.setenv("TOOL_TIMEOUT_SECONDS", "2")
 
     app = create_app()
-    async with app.router.lifespan_context(app):
-        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://t") as client:
-            token = (await client.post("/auth/login", json={"customer_number": "CUST-0001"})).json()[
-                "access_token"
-            ]
-            body = (
-                await client.post(
-                    "/chat",
-                    json={"message": "What's my balance?"},
-                    headers={"Authorization": f"Bearer {token}"},
-                )
-            ).json()
-            health = (await client.get("/health")).json()
+    transport = httpx.ASGITransport(app=app)
+    async with (
+        app.router.lifespan_context(app),
+        httpx.AsyncClient(transport=transport, base_url="http://t") as client,
+    ):
+        login = await client.post("/auth/login", json={"customer_number": "CUST-0001"})
+        headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+        body = (await client.post("/chat", json={"message": "What's my balance?"}, headers=headers)).json()
+        health = (await client.get("/health")).json()
 
     assert body["trace"]["tool_error"] == "unavailable"
     assert body["response"] == "Your banking data is temporarily unavailable. Please try again in a moment."
