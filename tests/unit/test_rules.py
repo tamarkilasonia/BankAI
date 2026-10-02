@@ -56,6 +56,8 @@ def test_specification_examples(message: str, intent: Intent, arguments: dict[st
         ("what is my IBAN?", Intent.ACCOUNT_DETAILS, {}),
         ("show my recent transactions", Intent.TRANSACTIONS, {}),
         ("last 5 transactions", Intent.TRANSACTIONS, {"limit": 5}),
+        # Regression (found by the evaluation): "last 7 days" is a period, not a list size.
+        ("transaction history for the last 7 days", Intent.TRANSACTIONS, {"period": "last_7_days"}),
         (
             "incoming transactions last month",
             Intent.TRANSACTIONS,

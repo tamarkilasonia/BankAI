@@ -335,6 +335,7 @@ class AgentNodes:
             "llm_may_rephrase": rendered.llm_may_rephrase,
             "prompt_kind": rendered.prompt_kind,
             "sources": list(rendered.sources),
+            "disclaimer": rendered.disclaimer,
         }
 
     # --- 4. answers ---------------------------------------------------------------------
@@ -365,6 +366,10 @@ class AgentNodes:
             update = await self._llm_answer(
                 prompt, fallback=template, sources=[*facts, state["message"]], required=required
             )
+            disclaimer = state.get("disclaimer")
+            if update["response_source"] == "llm" and disclaimer and disclaimer not in update["response"]:
+                # Like sources: a required disclaimer is added by code, so the LLM cannot drop it.
+                update["response"] = f"{update['response']} {disclaimer}"
         return update | {
             "response": with_sources(update["response"], update["response_source"], state),
             "fallback_response": with_sources(template, "template", state),

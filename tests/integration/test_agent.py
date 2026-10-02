@@ -452,3 +452,28 @@ async def test_question_about_an_action_is_not_treated_as_a_request(
     assert (reply.intent, reply.tool) == (Intent.BANKING_KNOWLEDGE, "search_banking_policy")
     assert reply.pending_confirmation is None
     assert reply.safety_status is SafetyStatus.ALLOWED
+
+
+async def test_llm_answers_keep_the_mock_disclaimer(tool_server: MCPServer) -> None:
+    """Regression (found by the evaluation): the LLM dropped "MOCK rate" from exchange-rate answers."""
+    llm = ScriptedLLM("250.00 USD is 678.75 GEL at a rate of 2.7150.")
+
+    reply = await ask(assistant(tool_server, llm), "convert 250 usd to gel")
+
+    assert reply.response_source == "llm"
+    assert reply.response.startswith("250.00 USD is 678.75 GEL at a rate of 2.7150.")
+    assert reply.response.endswith(
+        "This is a MOCK illustrative rate (as of 2026-09-01), not a real market rate."
+    )
+
+
+async def test_a_disclaimer_the_llm_kept_is_not_repeated(tool_server: MCPServer) -> None:
+    answer = (
+        "For 20,000.00 GEL over 48 months at 11.90% the monthly payment is 525.70 GEL. "
+        "Estimate for a fixed-rate annuity loan; excludes fees and insurance. Not a credit offer."
+    )
+    reply = await ask(
+        assistant(tool_server, ScriptedLLM(answer)), "monthly payment for a 20000 GEL car loan over 4 years"
+    )
+
+    assert reply.response == answer

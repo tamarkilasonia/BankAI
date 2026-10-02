@@ -52,6 +52,7 @@ class AgentState(TypedDict, total=False):
     llm_may_rephrase: bool
     prompt_kind: str  # facts | passages
     sources: list[str]
+    disclaimer: str | None
     response: str
     response_source: str  # llm | template
     fallback_response: str | None  # the template answer, in case the output guard rejects the LLM's
