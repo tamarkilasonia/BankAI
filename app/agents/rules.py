@@ -3,16 +3,14 @@
 Why rules in an "AI" agent?
     * They are instant, free, and give the same answer every time - which makes
       the agent testable and lets it run with no LLM at all (offline mode).
-    * Safety-relevant patterns (prompt injection, other customers' data, money
-      movement) must not depend on a model's mood: rules catch them first and
-      the LLM cannot override them.
     * The LLM is still used (in hybrid mode) for everything the rules are unsure
       about: paraphrases, typos, other languages.
 
+Safety (prompt injection, other customers' data, money movement) is NOT decided
+here: the safety layer (``app/safety``) checks every message before routing.
+
 ``RuleRouter.route`` returns ``None`` when it has no idea, and a decision with
 ``confidence < 0.8`` when several intents matched and it had to guess.
-
-Phase 5 grows the safety patterns here into a dedicated safety layer.
 """
 
 import calendar
@@ -46,51 +44,6 @@ class RouteDecision:
 def _rx(*patterns: str) -> list[re.Pattern[str]]:
     return [re.compile(p) for p in patterns]
 
-
-# --- safety-relevant patterns (checked first, cannot be overridden) ------------------------
-
-UNSAFE_PATTERNS: dict[str, list[re.Pattern[str]]] = {
-    "prompt_injection": _rx(
-        r"\b(ignore|disregard|forget|override|bypass)\b.{0,40}\b(instructions?|rules|prompts?|guidelines|restrictions)\b",
-    ),
-    "system_prompt_extraction": _rx(
-        r"\b(system|hidden|initial|secret|internal)\s+(prompt|instructions?|message|rules)\b",
-        r"\b(reveal|show|print|repeat|output|tell me|what are)\b.{0,25}\byour\b.{0,15}\b(prompt|instructions|rules)\b",
-    ),
-    "credentials": _rx(
-        r"\b(database|db|admin|server|system|root|your)\b.{0,25}\b(passwords?|credentials?|api[ -]?keys?|secrets?|tokens?)\b",
-        r"\b(api[ -]?keys?|access tokens?|secret keys?|connection strings?)\b",
-    ),
-    "other_customer_data": _rx(
-        r"\b(another|other|someone else'?s?|different)\s+(customers?|users?|clients?|persons?|account holders?)\b",
-        r"\ball\s+(customers|users|clients)\b",
-        r"\bcust-\d{3,}\b",
-        r"\b(user|customer|client)\s+[a-z0-9]{1,12}'s\b",
-    ),
-    "internal_systems": _rx(
-        r"\b(dump|export|query|access|list|show)\b.{0,20}\b(the )?(database|db|tables|schema)\b",
-        r"\bselect\s+\*|\bdrop\s+table\b|\bunion\s+select\b",
-        r"\b(list|show|what are)\b.{0,15}\byour\b.{0,15}\b(tools|functions|endpoints)\b",
-    ),
-    "impersonation": _rx(
-        r"\b(i am|i'm|act as|acting as|pretend to be|pretend you are|you are now)\b.{0,25}"
-        r"\b(admin|administrator|developer|system|root|bank employee|manager|support agent)\b",
-        r"\b(developer|admin|god|jailbreak|dan)\s+mode\b",
-    ),
-}
-
-_QUESTION_START = re.compile(
-    r"^(how|what|which|when|where|why|is|are|do i|does|can i|could i|am i able|is it possible)\b"
-)
-HIGH_RISK_PATTERNS = _rx(
-    r"^(please |pls |kindly )?(can you |could you |would you |i want to |i'd like to |i would like to |"
-    r"help me |let's |lets )?(transfer|send|wire|pay|move|withdraw)\b",
-    r"\b(transfer|send|wire|move)\s+(\d|my|the|some|all|money|funds|gel|usd|eur|[$€₾])",
-    r"\bpay\s+(my|the|a|this|\d)",
-    r"\b(close|delete|cancel|terminate)\s+(my\s+)?(account|card|deposit)\b",
-    r"\b(change|reset|increase|raise|update|set)\s+(my\s+)?(pin|card limit|limit|phone number|address)\b",
-    r"\b(block|freeze|unfreeze|unblock|activate)\s+(my\s+)?(card|account)\b",
-)
 
 # --- informational intents ----------------------------------------------------------------
 
@@ -263,6 +216,21 @@ def _decimal(whole: str, fraction: str | None, thousands: str | None = None) -> 
     return value * 1000 if thousands else value
 
 
+def amounts_in(text: str) -> list[Decimal]:
+    """Every amount in a normalized text, in order ("5k" -> 5000)."""
+    return [_decimal(m.group(1), m.group(2), m.group(3)) for m in _AMOUNT.finditer(text)]
+
+
+def currencies_in(text: str) -> list[str]:
+    """Currency codes mentioned in a normalized text, in order of first appearance."""
+    hits = sorted((m.start(), code) for pattern, code in CURRENCY_WORDS for m in pattern.finditer(text))
+    ordered: list[str] = []
+    for _, code in hits:
+        if code not in ordered:
+            ordered.append(code)
+    return ordered
+
+
 class RuleRouter:
     def __init__(self, clock: Callable[[], datetime]) -> None:
         self._clock = clock
@@ -271,15 +239,6 @@ class RuleRouter:
 
     def route(self, message: str, *, previous: RouteDecision | None = None) -> RouteDecision | None:
         text = normalize(message)
-
-        for reason, patterns in UNSAFE_PATTERNS.items():
-            if any(p.search(text) for p in patterns):
-                return RouteDecision(Intent.UNSAFE, confidence=0.95, reason=reason)
-        if not _QUESTION_START.search(text) and any(p.search(text) for p in HIGH_RISK_PATTERNS):
-            return RouteDecision(
-                Intent.HIGH_RISK_ACTION, confidence=0.95, reason="money_movement_or_account_change"
-            )
-
         matched = {
             intent for intent, patterns in INTENT_PATTERNS.items() if any(p.search(text) for p in patterns)
         }
@@ -388,17 +347,8 @@ class RuleRouter:
             found = [c for c in found if c in SPENDING_CATEGORIES]
         return {"category": found[0].value} if len(found) == 1 else {}
 
-    @staticmethod
-    def _currencies(text: str) -> list[str]:
-        hits = sorted((m.start(), code) for pattern, code in CURRENCY_WORDS for m in pattern.finditer(text))
-        ordered: list[str] = []
-        for _, code in hits:
-            if code not in ordered:
-                ordered.append(code)
-        return ordered
-
     def _currency_filter(self, text: str) -> dict[str, Any]:
-        currencies = self._currencies(text)
+        currencies = currencies_in(text)
         return {"currency": currencies[0]} if len(currencies) == 1 else {}
 
     @staticmethod
@@ -423,7 +373,7 @@ class RuleRouter:
         return args
 
     def _exchange(self, text: str) -> tuple[dict[str, Any], list[str]]:
-        currencies = self._currencies(text)
+        currencies = currencies_in(text)
         args: dict[str, Any] = {}
         if len(currencies) >= 2:
             args = {"base_currency": currencies[0], "quote_currency": currencies[1]}
@@ -453,8 +403,7 @@ class RuleRouter:
             args["term_months"] = _count(years.group(1)) * 12
             term_text = text.replace(years.group(0), " ")
 
-        amounts = [_decimal(m.group(1), m.group(2), m.group(3)) for m in _AMOUNT.finditer(term_text)]
-        candidates = [a for a in amounts if a >= 100]
+        candidates = [a for a in amounts_in(term_text) if a >= 100]
         if candidates:
             args["amount"] = str(max(candidates))
         missing = [name for name in ("amount", "term_months") if name not in args]

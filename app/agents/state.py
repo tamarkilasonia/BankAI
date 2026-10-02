@@ -6,7 +6,7 @@ keys it changes, and LangGraph merges them in. Keys with a *reducer*
 node can append to ``errors`` or add its own entry to ``timings_ms``.
 
 Values are kept JSON-friendly (strings, numbers, dicts), so the state can be
-checkpointed later (phase 5: pausing the graph for a human confirmation).
+checkpointed: the graph pauses there while it waits for a human confirmation.
 """
 
 import operator
@@ -32,9 +32,10 @@ class AgentState(TypedDict, total=False):
 
     # --- routing ---
     intent: str
-    intent_source: str  # rules | llm | follow_up | fallback
+    intent_source: str  # safety | rules | llm | follow_up | fallback
     intent_confidence: float
-    route_reason: str
+    route_reason: str  # safety category, action kind, or the router's reason
+    safety_rule: str | None  # the input-guard rule that fired
 
     # --- tool call ---
     selected_tool: str | None
@@ -53,7 +54,13 @@ class AgentState(TypedDict, total=False):
     sources: list[str]
     response: str
     response_source: str  # llm | template
+    fallback_response: str | None  # the template answer, in case the output guard rejects the LLM's
     llm_latency_ms: float | None
+
+    # --- high-risk actions (human in the loop) ---
+    pending_action: dict[str, Any] | None  # ProposedAction, waiting for "yes" / "no"
+    confirmation: str | None  # confirmed | declined | expired | superseded | rejected
+    action_request: dict[str, Any] | None  # the MOCK request recorded after "yes"
 
     # --- safety & diagnostics (accumulated across nodes) ---
     safety_status: str

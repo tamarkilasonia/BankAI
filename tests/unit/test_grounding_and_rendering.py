@@ -6,7 +6,7 @@ from decimal import Decimal
 
 import pytest
 
-from app.agents.grounding import numbers_in, unsupported_numbers
+from app.agents.grounding import numbers_in, unsupported_numbers, unsupported_terms
 from app.agents.rendering import money, render
 from app.models.enums import AccountStatus, AccountType, Currency, TransactionCategory, TransactionDirection
 from app.services.periods import DateRange, Period
@@ -272,3 +272,58 @@ def test_key_numbers_and_rephrasing_policy() -> None:
     assert render(balances).llm_may_rephrase is True
     assert render(listing).llm_may_rephrase is False
     assert render(spending()).key_numbers == (Decimal("537.10"),)
+
+
+# --- grounding of words (non-numeric hallucinations) ------------------------------------------
+
+SPENDING_FACTS = [
+    "Period: between 2026-09-01 and 2026-09-28",
+    "Total spent: 2,275.58 GEL in 61 transactions",
+    "groceries: 812.40 GEL (20 transactions, 35.7% of spending)",
+    "Top merchant: FreshMart, 300.00 GEL (8 transactions)",
+]
+
+
+def test_answer_using_only_fact_words_is_grounded() -> None:
+    answer = "You spent 2,275.58 GEL in September, mostly on groceries. Your top merchant was FreshMart."
+    assert unsupported_terms(answer, *SPENDING_FACTS, "how much did I spend this month") == []
+
+
+@pytest.mark.parametrize(
+    ("answer", "problem"),
+    [
+        ("Most of it went on shopping.", "category:shopping"),
+        ("Your top merchant was Carrefour.", "name:Carrefour"),
+        ("Carrefour was your top merchant.", "name:Carrefour"),
+        ("You spent it in August.", "month:august"),
+        ("That is about $800.", "currency:USD"),
+        ("Grocery payments are free of charge.", "claim:free"),
+        ("There is no monthly fee on this account.", "claim:no_fee"),
+        ("Transfers arrive instantly.", "claim:instant"),
+        ("Your deposit is insured.", "claim:insured"),
+    ],
+)
+def test_invented_words_are_caught(answer: str, problem: str) -> None:
+    assert problem in unsupported_terms(answer, *SPENDING_FACTS)
+
+
+def test_claims_backed_by_the_documents_are_allowed() -> None:
+    passage = (
+        "[1] Transfers - Incoming transfers: Incoming transfers are free of charge and arrive instantly."
+    )
+    assert unsupported_terms("Incoming transfers are free and arrive instantly.", passage) == []
+
+
+def test_words_from_the_question_and_common_words_are_allowed() -> None:
+    answer = "Hello! How can I help with your savings in EUR today? May I suggest checking your balance?"
+    assert unsupported_terms(answer, "do you support EUR savings?") == []
+
+
+def test_sentence_initial_adverbs_are_not_names() -> None:
+    """Regression (live session): "Specifically, you spent..." was rejected as an invented name."""
+    answer = (
+        "Specifically, you spent 2,275.58 GEL. Looking at September, groceries lead.\n"
+        "- Interestingly, FreshMart."
+    )
+    assert unsupported_terms(answer, *SPENDING_FACTS) == []
+    assert unsupported_terms("You paid Carrefour, specifically.", *SPENDING_FACTS) == ["name:Carrefour"]

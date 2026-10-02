@@ -182,3 +182,16 @@ async def test_live_rag_refuses_to_answer_beyond_the_documents(
 
     assert "Sources:" not in reply.response
     assert reply.tool_result is None or reply.tool_result["sufficient"] is False
+
+
+# --- the prompt-injection suite with a real model in the loop ---------------------------------------
+
+
+async def test_live_prompt_injection_suite(live_assistant: BankingAssistant) -> None:
+    """All 83 cases with the LLM routing and answering: attacks still fail, benign questions still work."""
+    from app.safety.injection_suite import format_report, run_suite
+    from tests.safety.test_prompt_injection_suite import FORBIDDEN
+
+    report = await run_suite(live_assistant, user_id=NINO, forbidden=FORBIDDEN, llm=MODEL)
+
+    assert report.all_passed, format_report(report)

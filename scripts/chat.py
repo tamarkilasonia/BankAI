@@ -11,21 +11,17 @@ is whatever LLM_PROVIDER / LLM_BASE_URL / LLM_MODEL configure (none = offline).
 
 import argparse
 import asyncio
-import secrets
 import sys
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from app.agents.assistant import AssistantReply, BankingAssistant, PreviousTurn
+from app.agents.assistant import AssistantReply, BankingAssistant, PendingConfirmation, PreviousTurn
+from app.agents.factory import open_assistant
 from app.core.config import Settings, get_settings
 from app.core.logging import configure_logging
 from app.database.session import create_engine
-from app.mcp.client import MCPToolGateway
-from app.mcp.server import ToolServerDeps, build_mcp_server
 from app.models import User
-from app.rag.factory import create_retriever
-from app.rag.retriever import Retriever
 
 EXIT_WORDS = {"exit", "quit", "bye", ":q"}
 
@@ -53,6 +49,8 @@ def print_reply(reply: AssistantReply, *, debug: bool) -> None:
             f"args={reply.tool_arguments} | answer={reply.response_source} | {reply.safety_status} | "
             f"llm_calls={reply.llm_calls} | {reply.latency_ms:.0f} ms]"
         )
+        if reply.safety_flags:
+            print(f"        [safety: {', '.join(reply.safety_flags)}]")
         if reply.errors:
             print(f"        [errors: {', '.join(reply.errors)}]")
 
@@ -74,30 +72,8 @@ async def main(argv: list[str] | None = None) -> int:
             )
             return 1
 
-        retriever: Retriever | None = None  # in-process mode only; a remote server has its own
-        if args.mcp_url:
-            gateway = MCPToolGateway(
-                args.mcp_url,
-                auth_secret=settings.require_mcp_auth_secret(),
-                timeout_seconds=settings.tool_timeout_seconds,
-            )
-        else:
-            # In-process: server and client share this process, so a one-off secret is enough.
-            secret = secrets.token_urlsafe(32)
-            retriever = create_retriever(settings, sessions)
-            server = build_mcp_server(
-                ToolServerDeps(session_factory=sessions, auth_secret=secret, retriever=retriever)
-            )
-            gateway = MCPToolGateway(
-                server, auth_secret=secret, timeout_seconds=settings.tool_timeout_seconds
-            )
-        bot = BankingAssistant.from_settings(settings, gateway=gateway)
-        try:
+        async with open_assistant(settings, sessions, mcp_url=args.mcp_url) as bot:
             return await _converse(bot, user, args, describe_llm(settings))
-        finally:
-            await bot.aclose()
-            if retriever is not None:
-                await retriever.aclose()
     finally:
         await engine.dispose()
 
@@ -110,6 +86,7 @@ async def _converse(bot: BankingAssistant, user: User, args: argparse.Namespace,
     print(f"BankAI - MOCK data prototype. Signed in as {user.full_name} ({user.customer_number}).")
     print(f"LLM: {llm}. Type 'exit' to quit.")
     previous: PreviousTurn | None = None
+    pending: PendingConfirmation | None = None  # a high-risk request waiting for "yes" / "no"
     while True:
         try:
             line = await asyncio.to_thread(input, "you> ")
@@ -120,9 +97,10 @@ async def _converse(bot: BankingAssistant, user: User, args: argparse.Namespace,
             return 0
         if not line.strip():
             continue
-        reply = await bot.respond(user_id=user.id, message=line, previous=previous)
+        reply = await bot.respond(user_id=user.id, message=line, previous=previous, pending=pending)
         print_reply(reply, debug=args.debug)
         previous = reply.as_previous_turn() or previous
+        pending = reply.pending_confirmation
 
 
 if __name__ == "__main__":
