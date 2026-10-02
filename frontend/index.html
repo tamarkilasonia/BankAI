@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>BankAI - MOCK banking assistant</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="styles.css" />
+    <script type="module" src="js/main.js"></script>
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-name">BankAI</span>
+        <span class="mock-badge" title="No real customers, accounts or payments exist in this prototype">MOCK data · no real money</span>
+      </div>
+      <nav class="tabs" id="tabs" hidden>
+        <a href="#chat" class="tab" data-tab="chat">Chat</a>
+        <a href="#evaluation" class="tab" data-tab="evaluation">Evaluation</a>
+      </nav>
+      <div class="session" id="session-box" hidden>
+        <span id="session-name"></span>
+        <button type="button" class="link-button" id="sign-out">Sign out</button>
+      </div>
+    </header>
+
+    <div class="banner" id="banner" role="alert" hidden>
+      <span id="banner-text"></span>
+      <button type="button" class="link-button" id="banner-close" aria-label="Dismiss">Dismiss</button>
+    </div>
+
+    <!-- Sign in (MOCK) -->
+    <main id="login-view" class="login" hidden>
+      <form id="login-form" class="card login-card">
+        <h1>Sign in</h1>
+        <p class="muted">
+          A prototype with ten MOCK customers. There are no passwords: pick a customer to act as.
+        </p>
+        <label for="customer-select">Customer</label>
+        <select id="customer-select" required></select>
+        <button type="submit" class="primary" id="login-button">Sign in</button>
+      </form>
+    </main>
+
+    <!-- Chat -->
+    <main id="chat-view" class="chat-layout" hidden>
+      <section class="chat-panel" aria-label="Conversation">
+        <ol class="messages" id="messages" aria-live="polite"></ol>
+        <form class="composer" id="composer">
+          <label class="sr-only" for="message-input">Your message</label>
+          <textarea
+            id="message-input"
+            rows="2"
+            maxlength="2000"
+            placeholder="Ask about your balance, spending, transfers, fees..."
+          ></textarea>
+          <div class="composer-actions">
+            <button type="button" class="mic" id="mic-button" aria-pressed="false" title="Speak your question">
+              <span aria-hidden="true">●</span> <span id="mic-label">Speak</span>
+            </button>
+            <button type="submit" class="primary" id="send-button">Send</button>
+          </div>
+          <div class="composer-options">
+            <label for="voice-language">Speech language</label>
+            <select id="voice-language">
+              <option value="">Detect</option>
+              <option value="en">English</option>
+              <option value="ka">ქართული (Georgian)</option>
+            </select>
+            <label class="checkbox"><input type="checkbox" id="read-aloud" /> Read answers aloud</label>
+            <span class="muted" id="voice-status"></span>
+          </div>
+        </form>
+      </section>
+      <aside class="side-panel" aria-label="Your accounts">
+        <section class="card">
+          <h2>Your accounts</h2>
+          <ul class="account-list" id="account-list"></ul>
+        </section>
+        <section class="card">
+          <h2>Recent transactions</h2>
+          <ul class="tx-list" id="tx-list"></ul>
+        </section>
+        <section class="card muted small">
+          <h2>Try asking</h2>
+          <ul class="suggestions" id="suggestions"></ul>
+        </section>
+      </aside>
+    </main>
+
+    <!-- Evaluation dashboard -->
+    <main id="evaluation-view" class="dashboard" hidden>
+      <form class="card operator" id="operator-form" hidden>
+        <h1>Evaluation dashboard</h1>
+        <p class="muted">The results show every MOCK customer's answers, so the dashboard needs the operator key (OPERATOR_API_KEY).</p>
+        <label for="operator-key">Operator key</label>
+        <input id="operator-key" type="password" autocomplete="off" required minlength="32" />
+        <button type="submit" class="primary">Open dashboard</button>
+      </form>
+      <div id="dashboard" hidden>
+        <div class="filters">
+          <label for="run-select">Run</label>
+          <select id="run-select"></select>
+          <span class="spacer"></span>
+          <label for="run-category">New run</label>
+          <select id="run-category"></select>
+          <button type="button" class="primary" id="run-button">Run evaluation</button>
+          <span class="muted" id="run-status"></span>
+        </div>
+        <section id="run-summary"></section>
+        <section class="tiles" id="metric-tiles" aria-label="Metrics"></section>
+        <section class="card">
+          <h2>Pass rate by category</h2>
+          <div id="category-chart" class="bar-chart"></div>
+        </section>
+        <section class="card">
+          <div class="section-head">
+            <h2 id="failures-title">Failed cases</h2>
+            <label for="failure-filter">Category</label>
+            <select id="failure-filter"></select>
+          </div>
+          <div class="table-wrap">
+            <table class="failures" id="failures-table">
+              <thead>
+                <tr><th>Case</th><th>Category</th><th>Input</th><th>Expected</th><th>Actual</th><th>Why it failed</th></tr>
+              </thead>
+              <tbody id="failures-body"></tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+    </main>
+
+    <div class="tooltip" id="tooltip" role="tooltip" hidden></div>
+  </body>
+</html>
