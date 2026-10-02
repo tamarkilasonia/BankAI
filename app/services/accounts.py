@@ -23,10 +23,10 @@ async def _owned_accounts(
     account_type: AccountType | None = None,
     currency: Currency | None = None,
 ) -> list[Account]:
-    if account_id is not None:
-        return [await get_owned_account(session, principal, account_id)]
-
     stmt = select(Account).where(Account.user_id == principal.user_id).order_by(Account.account_number)
+    if account_id is not None:
+        await get_owned_account(session, principal, account_id)  # explicit check, clear error
+        stmt = stmt.where(Account.id == account_id)  # and the query stays scoped to the owner
     if account_type is not None:
         stmt = stmt.where(Account.account_type == account_type)
     if currency is not None:

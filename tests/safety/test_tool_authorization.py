@@ -75,6 +75,31 @@ async def test_foreign_account_id_is_denied_without_leaking(
     assert_no_victim_data(caught.value.message)
 
 
+async def test_scoped_queries_hold_even_if_the_ownership_check_is_skipped(
+    gateway: MCPToolGateway, nino: Principal, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Defence in depth: switch the explicit check off, and every query still filters by owner.
+
+    (Found by mutation testing: the balance and details tools loaded a requested account by
+    ID alone, so the explicit check was their only protection.)
+    """
+    from app.services import accounts, spending, transactions
+
+    async def no_check(session: Any, principal: Principal, account_id: uuid.UUID) -> Account:
+        return await session.get(Account, account_id)  # the bug: no ownership test
+
+    for module in (accounts, spending, transactions):
+        monkeypatch.setattr(module, "get_owned_account", no_check)
+
+    for tool, arguments in FOREIGN_ACCOUNT_CALLS:
+        try:
+            result = await gateway.call(tool, arguments, principal=nino)
+        except ToolCallError as error:
+            assert_no_victim_data(error.message)
+        else:
+            assert_no_victim_data(result.output.model_dump(mode="json"))
+
+
 async def test_foreign_and_nonexistent_accounts_look_identical(tool_server: MCPServer) -> None:
     """Otherwise the error itself would reveal which account IDs exist (enumeration)."""
     token = create_principal_token(NINO, secret=TEST_MCP_SECRET)

@@ -22,6 +22,7 @@ from pydantic import BaseModel
 
 from app.agents.rendering import money
 from app.agents.rules import amounts_in, currencies_in, normalize
+from app.safety.normalization import canonical
 
 CONFIRMATION_TTL_SECONDS = 300
 
@@ -92,7 +93,7 @@ _QUESTION_START = re.compile(
 
 def is_question(message: str) -> bool:
     """Phrased as a question ("How do I...", "Can I...") rather than as a request ("Transfer...")."""
-    return bool(_QUESTION_START.search(normalize(message)))
+    return bool(_QUESTION_START.search(canonical(message)))  # the guard's reading: look-alikes undone
 
 
 def asks_about_policy(message: str) -> bool:
@@ -109,7 +110,7 @@ def detect_action(message: str) -> ActionKind | None:
     """The kind of action the message asks the assistant to perform, if any."""
     if is_question(message):
         return None
-    text = normalize(message)
+    text = canonical(message)
     for kind, patterns in ACTION_PATTERNS.items():
         if any(p.search(text) for p in patterns):
             return kind

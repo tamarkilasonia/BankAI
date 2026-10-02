@@ -6,6 +6,9 @@ pytest==9.1.1
 pytest-asyncio==1.4.0
 pytest-cov==7.1.0
 aiosqlite==0.22.1               # in-memory SQLite for fast unit tests (no server needed)
+hypothesis==6.168.3             # property-based tests (tests/property)
+hypothesis-jsonschema==0.23.1   # generates well-formed tool calls from the MCP JSON schemas
+pytest-randomly==5.0.0          # random test order on every run: catches hidden coupling (-p no:randomly to turn off)
 
 # --- Code quality ---
 ruff==0.16.9                    # linter + formatter

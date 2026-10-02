@@ -34,6 +34,7 @@ ignore = [
 "app/agents/rules.py" = ["E501"]         # regex tables read better unbroken
 "app/safety/policy.py" = ["E501"]        # (same)
 "app/safety/actions.py" = ["E501"]       # (same)
+"tests/property/test_safety_properties.py" = ["RUF001"]  # Cyrillic/Greek look-alikes on purpose
 
 [tool.ruff.lint.isort]
 known-first-party = ["app", "scripts", "tests"]
@@ -81,6 +82,10 @@ branch = true
 [tool.coverage.report]
 show_missing = true
 skip_covered = false
+precision = 1
+# The specification asks for >= 80%. Measured: 99.8% with PostgreSQL, 99.6% without.
+# The gate sits a few points lower: a real drop fails CI, an honest refactoring does not.
+fail_under = 95
 exclude_also = [
     "if __name__ == .__main__.:",
     "if TYPE_CHECKING:",

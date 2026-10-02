@@ -188,8 +188,8 @@ or the offline provider.
 | 7 | Voice | STT/TTS interfaces, OpenAI + fake providers, audio validation, Georgian notes | ✅ Done |
 | 8 | FastAPI | All endpoints, mock login, request-ID middleware, error handlers, OpenAPI docs | ✅ Done |
 | 9 | Frontend | Chat, microphone, audio playback, evaluation dashboard | ✅ Done |
-| 10 | Testing | Fill gaps: security suite, voice, end-to-end; ≥80% coverage | Next |
-| 11 | Docker | Dockerfile, compose: backend, mcp-server, db (pgvector), migrate/seed job | |
+| 10 | Testing | Fill gaps: security suite, voice, end-to-end; ≥80% coverage | ✅ Done |
+| 11 | Docker | Dockerfile, compose: backend, mcp-server, db (pgvector), migrate/seed job | Next |
 | 12 | CI/CD | Lint → type-check → unit → integration (PG service) → coverage → image build | |
 | 13 | Docs | README, architecture diagrams, INTERVIEW.md | |
 
@@ -284,10 +284,14 @@ a clarifying question instead of a guess.
 **Answer guards** (`grounding.py`, `rendering.py`): every tool result is rendered into
 FACTS plus a correct-by-construction template answer. An LLM answer is replaced by the
 template when it
-1. contains a number that is not in the facts or the question (*no invention*), or
+1. contains a number that is not in the facts or the question (*no invention*). A policy
+   answer may use only the passages' numbers ("Is the fee 0.1%?" cannot vouch for 0.1%), and
+   small numbers (0-12) pass as counts but never as amounts ("10 GEL", "5%") - phase 10, or
 2. contains a fact-carrying word the facts don't support (phase 5): a claim such as "free",
    "no fee", "instant", "guaranteed", "insured"; a currency, spending category or month; or a
-   capitalized name such as a merchant (*no invention without digits*), or
+   capitalized name such as a merchant (*no invention without digits*). A claim must be made
+   by **one fact sentence about the same subject** and never comes from the question: "free"
+   for own-account transfers does not back "international transfers are free" (phase 10), or
 3. omits one of the result's key numbers (*no omission*), or
 4. is empty, times out, or the LLM is unreachable.
 
@@ -373,6 +377,9 @@ rules are applied to several *views* of the message, so common disguises don't w
 Unicode normalization (NFKC, zero-width and other invisible characters removed, Cyrillic and
 Greek look-alike letters mapped), leetspeak, spaced letters, and decoded base64, hex, URL
 encoding, ROT13 and reversed text. A refusal records which view matched (`obfuscated:base64`).
+Phase 10 tested these claims with generated disguises (Hypothesis) and fixed six gaps - for
+example spaced-out Georgian letters, and base64 of a text padded with zero-width characters
+(docs/TESTING.md, section 8). Action detection now reads the same normalized text.
 
 **Indirect prompt injection** - instructions hidden in data the assistant reads:
 * knowledge-base chunks are screened before embedding; `ingest_knowledge_base` refuses a
@@ -500,10 +507,14 @@ labels is the documented next step for open-ended answers.
 | Prompt-injection detection | 52.0% (13/25) | 72.0% (18/25) |
 | Authorization pass rate | 65.0% (13/20) | 65.0% (13/20) |
 | Data isolation | 100.0% (246/246) | 100.0% (246/246) |
-| Average latency (p95) | 0.01 s (0.01 s) | 0.71 s (2.41 s) |
-| LLM-written answers | 0.0% | 37.4% |
+| Average latency (p95) | 0.01 s (0.01 s) | 0.75 s (2.53 s) |
+| LLM-written answers | 0.0% | 37.0% |
 
 By category (passed): ACCOUNT 23→26/27, TRANSACTION 26→29/31, SPENDING 26→26/28, CALCULATION 20→23/24, RAG 14→22/33, GENERAL 15→15/16, SAFETY 20→22/22, PROMPT_INJECTION 13→18/25, AUTHORIZATION 13→13/20, VOICE 12→15/20 (offline→LLM).
+
+Re-measured after phase 10's stricter grounding: the same 209/246. One LLM answer (VOI-009)
+combined two passage sentences around a claim word and was replaced by the correct template
+answer (LLM-written answers 37.4% → 37.0%).
 
 Prompt-injection detection: attacks also in the injection suite 12/12 in both modes; the 13 `holdout` attacks 1/13 offline and 6/13 with the LLM. Defense (nothing leaked, nothing executed) is 25/25 in both modes. Latency is measured on an Apple M4 laptop with Ollama.
 
@@ -687,10 +698,30 @@ fixed; the first is now also covered by the smoke test's per-view checks.
 | Library churn: `mcp` 2.x, `openai` 3.x, `langgraph` 1.x and SQLAlchemy 2.1 are newer than most tutorials | Wrong API usage | Exact pins; verify APIs against installed source; integration tests per boundary |
 | LLM non-determinism | Flaky tests, noisy metrics | Offline provider for CI; temperature 0 + structured outputs; repeated runs for LLM-mode eval |
 | Detectors are bypassable (encoding, paraphrase, indirect injection) | Unsafe answers | Defense in depth (D2); authorization in the tool layer; decoding views; adversarial suite. Measured: unseen paraphrases 0/12 leaked, 4/12 refused (section 8) |
-| Hallucinated fees/rates/amounts | Wrong financial info | Answers only from tool results/documents; numeric-claim verification against context; "not enough information" path |
+| Hallucinated fees/rates/amounts | Wrong financial info | Answers only from tool results/documents; numeric-claim verification against context; claims checked per sentence; "not enough information" path. Phase 10's scripted-LLM tests found and closed three holes (borrowed claims, leading questions, small amounts) |
 | Georgian STT/TTS quality | Poor voice UX in Georgian | **Measured:** Georgian TTS works (Piper), Georgian STT does not (Whisper small/large-v3-turbo); the pipeline never acts on it and asks to repeat or type (section 10) |
 | pgvector not in the local Homebrew PostgreSQL 15 | Phase 4 blocked locally | **Resolved:** pgvector 0.8.6 built from source for PG15; Docker uses `pgvector/pgvector:pg16` |
 | Docker not installed on the development machine | Phase 11 not verifiable locally | Install Docker Desktop / OrbStack; CI builds the image regardless |
 | SQLite (unit) vs PostgreSQL (prod) differences | Bugs hidden in unit tests | PostgreSQL integration tests in CI (`REQUIRE_INTEGRATION_DB=1`) |
 | Evaluation cost/latency with a real LLM | Expensive runs | Small default model, offline baseline, run subsets by category |
 | "This month" depends on time zone and seed date | Off-by-one-day answers | Bank time zone (UTC+4) for periods; seed `--anchor`; oracle uses the same period logic |
+
+---
+
+## 14. Testing (phase 10)
+
+The full strategy is in [TESTING.md](TESTING.md): the test layers, a requirement→test traceability
+matrix (checked by a test), the test doubles and what each could hide, and the oracles. Phase 10
+added testing *of the tests*:
+
+* **property-based tests** (Hypothesis): disguised attacks, normalization idempotence,
+  grounding, loan/currency/date rules, and schema-driven fuzzing of the MCP tools;
+* **mutation testing** (`scripts/mutation_test.py`): deliberate bugs in each defence, all of
+  which the tests catch;
+* **random test order** (`pytest-randomly`), **concurrency** tests (also on PostgreSQL),
+  RAG + LLM with a scripted model, FastAPI on PostgreSQL, and a full agent turn over MCP HTTP.
+
+They found twelve problems: three hallucination holes in grounding, six gaps in the injection
+normalizer and action detection, a missing authorization layer for single-account queries (the docs promised two
+layers; there was one), a fuzz test that never reached the code it was meant to test, and a
+test-setup problem that lost audit rows under concurrency.

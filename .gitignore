@@ -28,3 +28,6 @@ reports/
 
 # Downloaded speech models (large binaries, never committed)
 models/
+
+# Hypothesis example database (failing examples are replayed locally)
+.hypothesis/
