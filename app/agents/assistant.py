@@ -89,6 +89,8 @@ class AssistantReply(BaseModel):
     errors: list[str]
     latency_ms: float
     timings_ms: dict[str, float]
+    tool_latency_ms: float | None = None  # the MCP tool call
+    llm_latency_ms: float | None = None  # the last LLM call
     pending_confirmation: PendingConfirmation | None = None
     confirmation: str | None = None  # confirmed | declined | expired | superseded | rejected
     action_request: ActionRequest | None = None  # the MOCK record after a confirmed action
@@ -290,6 +292,8 @@ class BankingAssistant:
             + ([f"input:{final['input_error']}"] if final.get("input_error") else []),
             latency_ms=round((time.perf_counter() - started) * 1000, 2),
             timings_ms=final.get("timings_ms", {}),
+            tool_latency_ms=final.get("tool_latency_ms"),
+            llm_latency_ms=final.get("llm_latency_ms"),
             pending_confirmation=pending,
             confirmation=final.get("confirmation"),
             action_request=ActionRequest.model_validate(action_request) if action_request else None,

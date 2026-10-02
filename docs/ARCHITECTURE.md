@@ -186,8 +186,8 @@ or the offline provider.
 | 5 | Safety + authorization | Guards, policy module, injection detectors, high-risk confirmation flow (interrupt) | ✅ Done |
 | 6 | Evaluation | 200+ case dataset, SQL oracle, scorers, runner, reports, DB persistence | ✅ Done |
 | 7 | Voice | STT/TTS interfaces, OpenAI + fake providers, audio validation, Georgian notes | ✅ Done |
-| 8 | FastAPI | All endpoints, mock login, request-ID middleware, error handlers, OpenAPI docs | Next |
-| 9 | Frontend | Chat, microphone, audio playback, evaluation dashboard | |
+| 8 | FastAPI | All endpoints, mock login, request-ID middleware, error handlers, OpenAPI docs | ✅ Done |
+| 9 | Frontend | Chat, microphone, audio playback, evaluation dashboard | Next |
 | 10 | Testing | Fill gaps: security suite, voice, end-to-end; ≥80% coverage | |
 | 11 | Docker | Dockerfile, compose: backend, mcp-server, db (pgvector), migrate/seed job | |
 | 12 | CI/CD | Lint → type-check → unit → integration (PG service) → coverage → image build | |
@@ -587,7 +587,57 @@ STT as a separate service with a queue.
 
 ---
 
-## 11. Technical risks
+## 11. HTTP API (phase 8)
+
+`uvicorn app.api.main:app` - interactive docs at `/docs` (OpenAPI, generated from the Pydantic models).
+
+| Endpoint | Auth | What it does |
+|---|---|---|
+| `POST /auth/login` | - | MOCK login: customer number -> signed session token (HS256, 60 min) |
+| `GET /auth/me` | session | the signed-in customer |
+| `POST /chat` | session | one agent turn; `conversation_id` keeps context and pending confirmations |
+| `POST /voice/transcribe` | session | audio -> text, confidence, "would the assistant act on it?" |
+| `POST /voice/synthesize` | session | text -> WAV |
+| `POST /voice/chat` | session | audio -> agent -> answer text + WAV (base64) |
+| `GET /accounts/{user_id}` | session | own accounts and balances; another `user_id` -> 403 |
+| `GET /transactions/{user_id}` | session | own transactions (period, category, direction, limit) |
+| `GET /evaluations`, `GET /evaluations/{id}` | operator key | runs and per-case results (dashboard) |
+| `POST /evaluations/run` | operator key | 202 + run ID; runs in the background, one at a time |
+| `GET /health` | - | database reachability and configured providers (503 when degraded) |
+
+**Identity.** The customer comes only from the session token - never from the URL, the body or
+the LLM. Paths that name a customer are checked against it (`authorize_user_access`); a foreign
+and a non-existent `user_id` get the identical 403. Session tokens and MCP principal tokens use
+different secrets and audiences, so neither can be replayed as the other. The login itself is
+MOCK (no password) and says so in every response.
+
+**Conversations.** The client holds an opaque `conversation_id`; the state (previous turn,
+pending confirmation) stays on the server, bound to the customer. Another customer's, an
+unknown or an expired ID silently starts a new conversation. In memory per process (Redis
+with a TTL for several instances).
+
+**Audit trail.** Every text and voice turn is written to `conversation_logs`: request ID,
+customer, channel, input, intent, tool and arguments, tool and LLM latency, total latency,
+answer, safety status and flags, error code - input, arguments and answer pass through the
+same secret redaction as the logs. A failing audit write is logged and does not cost the
+customer the answer (a production bank might prefer to fail closed).
+
+**Errors.** One format everywhere - `{"error": {"code", "message", "request_id"}}`: validation
+errors list field and problem but never the submitted value; voice errors map to 400/413/415/
+422/502/503; access denied -> 403; database outage -> 503; anything unexpected -> a generic
+500 from the request middleware, with the traceback in the log only. Every response carries
+`X-Request-ID` (a caller's ID is reused only if it is short and safe - no log injection).
+
+**Why the data endpoints skip MCP.** MCP is the boundary for the *agent's* tools. The web UI is a
+first-party client of the backend and calls the same domain services directly - authorization
+lives in those services, so both paths enforce exactly the same rules.
+
+**Limitations.** No rate limiting; in-memory conversations and evaluation jobs (one process);
+the operator key is a shared secret rather than a role in an identity provider.
+
+---
+
+## 12. Technical risks
 
 | Risk | Impact | Mitigation |
 |------|--------|-----------|
