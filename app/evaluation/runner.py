@@ -11,6 +11,7 @@ the data the agent was given.
 
 import secrets
 import time
+import uuid
 from collections.abc import AsyncIterator, Callable, Sequence
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
@@ -120,18 +121,19 @@ async def evaluate(
     cases: Sequence[EvalCase] | None = None,
     dataset: Path = DATASET,
     results_store: async_sessionmaker[AsyncSession] | None = None,
+    run_id: uuid.UUID | None = None,
     progress: Progress | None = None,
 ) -> EvaluationReport:
     """Run ``cases`` (default: the whole dataset) with the agent configured by ``settings``.
 
     ``results_store``: where to save the run (the application database); None = don't save.
+    ``run_id``: a run already created with ``store.start_run`` (the API answers with its ID first).
     """
     cases = list(cases) if cases is not None else load_cases(dataset)
     model = None if settings.llm_provider == "none" else settings.llm_model
     version = dataset_version(dataset)
     started_at, started = datetime.now(UTC), time.perf_counter()
-    run_id = None
-    if results_store is not None:
+    if results_store is not None and run_id is None:
         run_id = await store.start_run(
             results_store,
             llm_provider=settings.llm_provider,

@@ -109,6 +109,19 @@ class Settings(BaseSettings):
     response_mode: Literal["llm", "template"] = "llm"
     max_message_chars: int = Field(default=1000, ge=10, le=20000)
 
+    # --- API ---
+    # Signs the (MOCK) login session tokens. Unset outside production: a random per-process
+    # secret is used, so sessions end when the server restarts. Required in production.
+    api_session_secret: SecretStr | None = None
+    api_session_ttl_minutes: int = Field(default=60, ge=1, le=24 * 60)
+    # Protects the evaluation endpoints (they cost compute and show every mock customer's
+    # answers). Unset = the endpoints are disabled.
+    operator_api_key: SecretStr | None = None
+    # How the API's agent reaches the tools: in the same process, or the MCP server over HTTP.
+    mcp_transport: Literal["in_process", "http"] = "in_process"
+    conversation_ttl_minutes: int = Field(default=30, ge=1, le=24 * 60)
+    cors_origins: list[str] = Field(default=[], description="Extra browser origins (JSON list in env).")
+
     # --- Voice ---
     # Speech-to-text. "none": voice input disabled. "faster_whisper": local Whisper (free,
     # offline after the model download). "openai_compatible": an OpenAI-style
@@ -153,6 +166,8 @@ class Settings(BaseSettings):
         "rag_min_score",
         "stt_api_key",
         "tts_api_key",
+        "api_session_secret",
+        "operator_api_key",
         mode="before",
     )
     @classmethod
@@ -160,11 +175,11 @@ class Settings(BaseSettings):
         """``KEY=`` in a copied .env.example means "not configured", not "empty secret"."""
         return None if value == "" else value
 
-    @field_validator("mcp_auth_secret")
+    @field_validator("mcp_auth_secret", "api_session_secret", "operator_api_key")
     @classmethod
     def _secret_long_enough(cls, value: SecretStr | None) -> SecretStr | None:
         if value is not None and len(value.get_secret_value()) < 32:
-            raise ValueError("MCP_AUTH_SECRET must be at least 32 characters (HS256 key strength)")
+            raise ValueError("secrets and keys must be at least 32 characters (HS256 key strength)")
         return value
 
     @property

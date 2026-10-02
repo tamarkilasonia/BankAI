@@ -5,9 +5,12 @@ from app.api.main import create_app
 
 
 async def get_health() -> httpx.Response:
-    transport = httpx.ASGITransport(app=create_app())
-    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
-        return await client.get("/health")
+    """The real startup path: settings from the environment, services built in the lifespan."""
+    app = create_app()
+    async with app.router.lifespan_context(app):
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            return await client.get("/health")
 
 
 @pytest.mark.usefixtures("reset_app_state")
@@ -15,7 +18,13 @@ async def test_health_ok_when_database_reachable() -> None:
     response = await get_health()
 
     assert response.status_code == 200
-    assert response.json() == {"status": "ok", "environment": "test", "database": "ok"}
+    assert response.json() | {"components": {}} == {
+        "status": "ok",
+        "environment": "test",
+        "database": "ok",
+        "components": {},
+    }
+    assert response.json()["components"]["llm"] == "none (rules + templates)"
 
 
 @pytest.mark.usefixtures("reset_app_state")
