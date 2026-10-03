@@ -117,6 +117,30 @@ A workflow that has never run is untested code. Before pushing it:
 What cannot be checked locally is GitHub's own environment (runner images, service containers,
 caches). The first run on GitHub is the final check.
 
+## What the first runs on GitHub found
+
+The pipeline found two real problems in its first hours:
+
+1. **A flaky browser test.** The headless Chrome test failed in some runs and passed in others,
+   on the same code. The logs showed two different causes, both in the test, not in the app:
+   - *"Chrome did not start":* the test gave Chrome 10 seconds to start. A cold start on a busy
+     CI machine can take longer. It now waits up to 60 seconds, and if Chrome exits, it fails at
+     once with Chrome's own error message.
+   - *"page error: Uncaught":* a race condition. The test asked "is the sign-in form visible?"
+     before the slow CI machine had finished reading the page, so the form did not exist yet and
+     the check crashed instead of waiting. It was **reproduced locally** by slowing the first
+     page load in Chrome (the old test failed 3 out of 3 times), then fixed: the test waits until
+     the page is parsed, and an error while waiting counts as "not ready yet". The pytest test
+     now always runs with the slow first load (`SLOW_FIRST_LOAD=1`, 8 kB/s), so this case is
+     covered on every run instead of by luck.
+
+   Automatic retries were deliberately not added: they would hide flakiness, not fix it.
+2. **An incompatible dependency update.** Dependabot proposed `av` 19. The tests failed because
+   av 19 removed an argument that faster-whisper 1.2.1 (the newest release) still passes, so
+   every transcription would fail. The update was not merged, and `dependabot.yml` now skips av
+   19+ until faster-whisper supports it. This is exactly the job of running every update through
+   the pipeline.
+
 ## Recommended repository settings
 
 On GitHub, under *Settings → Branches*, protect `main`: require a pull request and the checks

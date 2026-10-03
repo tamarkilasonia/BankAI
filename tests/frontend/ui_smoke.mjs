@@ -5,6 +5,8 @@
 //   COLOR_SCHEME=light WIDTH=420 node tests/frontend/ui_smoke.mjs ...   (light mode, phone width)
 //   FAKE_MIC=question.wav node tests/frontend/ui_smoke.mjs ...           (+ a spoken question: Chrome
 //                                     plays the WAV as the microphone; needs STT enabled on the server)
+//   SLOW_FIRST_LOAD=1 node tests/frontend/ui_smoke.mjs ...               (the first page arrives at 8 kB/s,
+//                                     like a busy CI machine: the test must wait, not fail; pytest sets it)
 //
 // Signs in, asks a question, runs through a transfer confirmation, opens the evaluation
 // dashboard, and fails (exit 1) on any JavaScript error, CSP violation or missing content.
@@ -38,11 +40,20 @@ const chrome = spawn(
       : []),
     "about:blank",
   ],
-  { stdio: "ignore" },
+  { stdio: ["ignore", "ignore", "pipe"] },
 );
+// Chrome's own messages, to explain a failed start
+let chromeLog = "";
+chrome.stderr.on("data", (chunk) => (chromeLog = (chromeLog + chunk).slice(-2000)));
+let chromeExit = null;
+chrome.on("exit", (code, signal) => (chromeExit = signal ?? code));
 
-async function target() {
-  for (let i = 0; i < 50; i += 1) {
+// A cold start on a busy CI machine can take well over 10 s (CI once failed at 10 s), so wait up to
+// 60 s - but stop at once if Chrome has exited, with its own error message.
+async function target(timeoutMs = 60_000) {
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    if (chromeExit !== null) throw new Error(`Chrome exited (${chromeExit}) before it started:\n${chromeLog}`);
     try {
       const pages = await (await fetch(`http://127.0.0.1:${PORT}/json`)).json();
       const page = pages.find((p) => p.type === "page");
@@ -52,7 +63,7 @@ async function target() {
     }
     await sleep(200);
   }
-  throw new Error("Chrome did not start");
+  throw new Error(`Chrome did not start within ${timeoutMs / 1000} s:\n${chromeLog}`);
 }
 
 const problems = [];
@@ -68,17 +79,27 @@ function send(method, params = {}) {
 
 async function evaluate(expression) {
   const result = await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true });
-  if (result.exceptionDetails) throw new Error(`page error: ${result.exceptionDetails.text}`);
+  const details = result.exceptionDetails;
+  if (details) throw new Error(`page error: ${details.exception?.description ?? details.text}`);
   return result.result.value;
 }
 
+// An error while waiting means "not there yet", not failure: while the page is still loading, an
+// element the condition reads may not exist (CI once failed on "page error: Uncaught" right after
+// opening the UI). The last error is reported if the condition never becomes true.
 async function waitFor(expression, what, timeoutMs = 90_000) {
   const started = Date.now();
+  let lastError = null;
   while (Date.now() - started < timeoutMs) {
-    if (await evaluate(expression)) return;
+    try {
+      if (await evaluate(expression)) return;
+      lastError = null;
+    } catch (error) {
+      lastError = error;
+    }
     await sleep(250);
   }
-  throw new Error(`timed out waiting for ${what}`);
+  throw new Error(`timed out waiting for ${what}${lastError ? ` (${lastError.message})` : ""}`);
 }
 
 // Exactly one view may be visible (regression: display:grid once beat the "hidden" attribute).
@@ -124,8 +145,16 @@ try {
   }
 
   step("open the UI");
+  const throttle = (bytesPerSecond) =>
+    send("Network.emulateNetworkConditions", { offline: false, latency: 0, downloadThroughput: bytesPerSecond, uploadThroughput: -1 });
+  if (process.env.SLOW_FIRST_LOAD) {
+    await send("Network.enable");
+    await throttle(8000);
+  }
   await send("Page.navigate", { url: `${base}/` });
+  await waitFor(`document.readyState !== "loading" && location.pathname.startsWith("/ui/")`, "the page to load");
   await waitFor(`!document.getElementById("login-view").hidden`, "the sign-in form");
+  if (process.env.SLOW_FIRST_LOAD) await throttle(-1);
   await oneViewVisible("sign-in");
   await screenshot("1-sign-in");
 

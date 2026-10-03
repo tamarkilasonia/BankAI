@@ -15,8 +15,8 @@ interviewer wants to go deeper.
 - [F. Evaluation](#f-evaluation): 33–39
 - [G. Voice](#g-voice): 40–43
 - [H. Data, API and engineering](#h-data-api-and-engineering): 44–48
-- [I. Testing](#i-testing): 49–54
-- [J. Production, scaling and limitations](#j-production-scaling-and-limitations): 55–59
+- [I. Testing](#i-testing): 49–55
+- [J. Production, scaling and limitations](#j-production-scaling-and-limitations): 56–60
 
 ---
 
@@ -589,11 +589,27 @@ first push, I ran every step locally in a clean environment, which found a mypy 
 would have broken the first run. The image scan showed that the only Python vulnerabilities were
 in pip itself, so pip is now removed from the runtime image.
 
+### 55. Tell me about a flaky test you fixed.
+
+After merging, the browser end-to-end test failed in some CI runs and passed in others, on the
+same code. Rather than re-running until it went green, I read the logs: there were two different
+failures. "Chrome did not start" meant the test gave Chrome only 10 seconds, too little for a
+cold start on a busy CI machine. "page error: Uncaught" was a race condition: the test checked
+for the sign-in form before the page had finished loading, so the element didn't exist yet and
+the check crashed instead of waiting.
+
+I reproduced the race on my laptop by slowing down the page load in Chrome: the old test then
+failed 3 out of 3 times with exactly the CI error. I fixed both causes. The test now waits for the
+page to be parsed, treats an error while waiting as "not ready yet", and gives Chrome 60 seconds,
+failing immediately with Chrome's own error if it crashes. Finally, I made the slow page load
+part of the test, so every run now covers this case. I didn't add automatic retries, because they
+would hide the problem instead of fixing it.
+
 ---
 
 ## J. Production, scaling and limitations
 
-### 55. How would you scale this system?
+### 56. How would you scale this system?
 
 - **Stateless API:** move conversation state and pending confirmations from memory to Redis, and
   the LangGraph checkpointer to PostgreSQL, so several API instances can run behind a load
@@ -605,7 +621,7 @@ in pip itself, so pip is now removed from the runtime image.
 - **Database:** read replicas for the read-only tools, with pgvector's HNSW index scaling to far
   more documents than the current 52.
 
-### 56. What are the biggest limitations?
+### 57. What are the biggest limitations?
 
 - **Small model:** qwen2.5:3b; RAG routing is the weakest category at 22/33.
 - **Requests aimed at other customers** aren't refused (authorization pass rate 65%), though no
@@ -617,7 +633,7 @@ in pip itself, so pip is now removed from the runtime image.
 - **A developer-written evaluation dataset**, which has bias even with holdout cases.
 - **Everything is MOCK**, including the login.
 
-### 57. What would you change for production?
+### 58. What would you change for production?
 
 - A real identity provider with strong customer authentication instead of the MOCK login.
 - Asymmetric keys or OAuth for MCP tokens instead of a shared secret, and a read-only database
@@ -629,7 +645,7 @@ in pip itself, so pip is now removed from the runtime image.
 - A semantic groundedness check and a calibrated LLM judge alongside the exact checks.
 - Monitoring of real conversations for drift, and human review of refusals and failures.
 
-### 58. How are secrets handled?
+### 59. How are secrets handled?
 
 None are in the repository, the compose files or the image; tests check this. Locally they come
 from a git-ignored `.env`. In Docker, a one-shot init job generates them on first start into a
@@ -637,7 +653,7 @@ volume, as files readable only by the app user, and the app reads them through a
 directory. The MCP tokens, the session tokens and the operator key each have their own secret.
 Session and MCP tokens also have different audiences, so one can't be replayed as the other.
 
-### 59. What did you learn from this project?
+### 60. What did you learn from this project?
 
 That the LLM is the easy part. Most of the work, and most of the value, is in the system around
 it: deciding what the model is allowed to decide, checking what it says, and measuring behavior

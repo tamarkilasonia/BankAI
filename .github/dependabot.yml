@@ -16,6 +16,12 @@ updates:
       python:
         patterns: ["*"]
     open-pull-requests-limit: 3
+    ignore:
+      # av 19 removed the open(..., metadata_errors=) argument that faster-whisper 1.2.1 (the latest)
+      # passes, so every transcription fails (found by CI on Dependabot's PR #9, 2026-10-03).
+      # Remove this once a faster-whisper release supports av 19.
+      - dependency-name: av
+        versions: [">=19"]
 
   - package-ecosystem: github-actions
     directory: /
