@@ -1,0 +1,180 @@
+# BankAI continuous integration - the pipeline of the project specification:
+#
+#   install -> lint (ruff, mypy, actionlint) -> unit tests -> integration tests (PostgreSQL,
+#   browser) -> coverage gate -> mutation testing -> evaluation and safety reports
+#   -> Docker image: build, vulnerability scan, the real Compose stack
+#
+# No API key or LLM is needed: the agent runs offline (rules + templates). Tests that need a
+# real LLM or the speech models run in live-models.yml, started by hand.
+#
+# Every lane that needs a service is told so (REQUIRE_INTEGRATION_DB, REQUIRE_BROWSER,
+# REQUIRE_DOCKER): a missing database, browser or Docker FAILS the build instead of turning
+# into silently skipped tests.
+
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# Least privilege: the workflow only reads the repository.
+permissions:
+  contents: read
+
+# A newer push to the same branch cancels the run that is now out of date.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: "3.12"
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+  FORCE_COLOR: "1"
+
+jobs:
+  lint:
+    name: Lint and type-check
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: requirements*.txt
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+      - name: Lint (ruff)
+        run: ruff check --output-format=github .
+      - name: Formatting (ruff)
+        run: ruff format --check .
+      - name: Type-check (mypy, strict)
+        run: mypy
+      - name: Workflow files (actionlint + shellcheck)
+        run: actionlint
+
+  test:
+    name: Tests, coverage and reports
+    needs: lint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: bankai
+          POSTGRES_PASSWORD: bankai
+          POSTGRES_DB: bankai_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U bankai -d bankai_test"
+          --health-interval 5s --health-timeout 3s --health-retries 20
+    env:
+      TEST_DATABASE_URL: postgresql+asyncpg://bankai:bankai@localhost:5432/bankai_test
+      REQUIRE_INTEGRATION_DB: "1"
+      REQUIRE_BROWSER: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: requirements*.txt
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24" # the browser test uses Node's built-in WebSocket (Node 22+)
+      - name: Install dependencies (incl. the speech libraries, without the large models)
+        run: pip install -r requirements-dev.txt -r requirements-voice.txt
+      - name: Let Chrome use its sandbox
+        # Ubuntu 24.04 restricts unprivileged user namespaces, which Chrome's sandbox needs.
+        # Allowing them keeps the sandbox on (the alternative, --no-sandbox, turns it off).
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+
+      - name: Unit tests
+        run: >-
+          pytest -m "not postgres and not ui and not llm and not voice and not docker"
+          --cov --cov-report= --cov-fail-under=0
+      - name: Integration tests (PostgreSQL + pgvector, headless Chrome)
+        run: pytest -m "postgres or ui" --cov --cov-append --cov-report= --cov-fail-under=0
+      - name: Coverage (fails below the gate in pyproject.toml)
+        run: |
+          coverage xml
+          {
+            echo '### Coverage'
+            echo '```'
+            coverage report --format=total
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          coverage report --skip-covered
+
+      - name: Mutation testing (deliberate bugs in the defences must be caught)
+        run: python -m scripts.mutation_test
+
+      - name: Evaluation and prompt-injection reports (offline agent)
+        env:
+          DATABASE_URL: postgresql+asyncpg://bankai:bankai@localhost:5432/bankai
+        run: |
+          PGPASSWORD=bankai psql -h localhost -U bankai -d bankai_test -c "CREATE DATABASE bankai"
+          alembic upgrade head
+          python -m scripts.seed_db
+          mkdir -p reports
+          python -m scripts.run_safety_suite --json reports/prompt-injection.json | tee reports/prompt-injection.txt
+          python -m scripts.run_evaluation --no-save --quiet --report reports/evaluation.md --json reports/evaluation.json
+          cat reports/evaluation.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload reports
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: reports
+          path: |
+            reports/
+            coverage.xml
+          if-no-files-found: warn
+          retention-days: 30
+
+  docker:
+    name: Docker image and stack
+    needs: test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      REQUIRE_DOCKER: "1"
+      TRIVY_IMAGE: aquasec/trivy:0.75.0
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: requirements*.txt
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Build the image
+        run: docker compose build
+      - name: Vulnerability scan (fails on fixable HIGH or CRITICAL findings)
+        # Findings without a fix (in the Debian base image) are reported, not failed on:
+        # nobody can act on them until Debian ships a fix.
+        run: |
+          mkdir -p "$RUNNER_TEMP/trivy"
+          scan() {
+            docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+              -v "$RUNNER_TEMP/trivy:/root/.cache" "$TRIVY_IMAGE" image \
+              --quiet --scanners vuln --severity HIGH,CRITICAL "$@" bankai:local
+          }
+          {
+            echo '### Image vulnerabilities (HIGH and CRITICAL, including unfixed)'
+            echo '```'
+            scan --format table
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          scan --ignore-unfixed --exit-code 1
+      - name: The Compose stack, tested from outside
+        run: pytest -m docker -p no:randomly
+      - name: Logs of the stack (on failure)
+        if: ${{ failure() }}
+        run: docker compose logs --no-color --tail 200 || true

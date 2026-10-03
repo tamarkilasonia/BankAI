@@ -49,6 +49,8 @@ def _model_available() -> bool:
 
 
 if not _model_available():
+    if os.getenv("REQUIRE_LLM") == "1":  # the live-models workflow: a missing model is a failure
+        pytest.fail(f"no LLM server with {MODEL} at {BASE_URL} (REQUIRE_LLM=1)", pytrace=False)
     pytest.skip(f"no LLM server with {MODEL} at {BASE_URL}", allow_module_level=True)
 
 

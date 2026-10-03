@@ -289,6 +289,31 @@ MUTANTS: tuple[Mutant, ...] = (
         ("tests/unit/test_docker_config.py",),
         'the image lacks aiosqlite: "Run evaluation" crashes (found by building the image)',
     ),
+    # --- the CI pipeline ---------------------------------------------------------------------
+    Mutant(
+        "ci-silent-database-skip",
+        ".github/workflows/ci.yml",
+        'REQUIRE_INTEGRATION_DB: "1"',
+        'REQUIRE_INTEGRATION_DB: "0"',
+        ("tests/unit/test_ci_workflow.py",),
+        "CI passes although PostgreSQL is missing (the integration tests skip)",
+    ),
+    Mutant(
+        "ci-unpinned-action",
+        ".github/workflows/ci.yml",
+        "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0",
+        "actions/setup-node@v7",
+        ("tests/unit/test_ci_workflow.py",),
+        "an action follows a movable tag that someone could point at other code",
+    ),
+    Mutant(
+        "ci-write-permissions",
+        ".github/workflows/ci.yml",
+        "permissions:\n  contents: read",
+        "permissions:\n  contents: write",
+        ("tests/unit/test_ci_workflow.py",),
+        "the pipeline may change the repository",
+    ),
     # --- web UI and evaluation ------------------------------------------------------------
     Mutant(
         "ui-html-sink",

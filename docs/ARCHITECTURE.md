@@ -193,8 +193,8 @@ or the offline provider.
 | 9 | Frontend | Chat, microphone, audio playback, evaluation dashboard | ✅ Done |
 | 10 | Testing | Fill gaps: security suite, voice, end-to-end; ≥80% coverage | ✅ Done |
 | 11 | Docker | Dockerfile, compose: backend, mcp-server, database (pgvector), init job | ✅ Done |
-| 12 | CI/CD | Lint → type-check → unit → integration (PG service) → coverage → image build | Next |
-| 13 | Docs | README, architecture diagrams, INTERVIEW.md | |
+| 12 | CI/CD | Lint → type-check → unit → integration (PG service) → coverage → image build | ✅ Done |
+| 13 | Docs | README, architecture diagrams, INTERVIEW.md | Next |
 
 Testing is not deferred to phase 10: every phase ships with its tests.
 
@@ -755,3 +755,20 @@ from `.env`), stored as 0600 files in a volume, and read through `SECRETS_DIR`
 development dependency only. Locally nothing failed; in the image "Run evaluation" would have
 crashed. Tests: `tests/unit/test_docker_config.py` (rules, wiring, documentation - no Docker
 needed) and `tests/docker/test_compose_stack.py` (the real stack, from outside).
+
+---
+
+## 16. Continuous integration (phase 12)
+
+GitHub Actions runs [ci.yml](../.github/workflows/ci.yml) on every push - details in [CI.md](CI.md):
+lint (ruff, mypy strict, actionlint + shellcheck) → tests (unit; integration against a
+pgvector service and headless Chrome; 95% coverage gate; mutation testing; offline evaluation and
+injection reports as artifacts) → Docker (build, Trivy gate on fixable HIGH/CRITICAL findings, the
+Compose stack tested from outside). No secrets are needed. Actions are pinned to commit SHAs,
+permissions are read-only, and every service-backed lane fails instead of skipping. The live
+models (LLM evaluation, speech) run in a separate, manually started workflow.
+
+**Verifying the workflow before its first run** - every step was run locally in a fresh virtualenv
+built like CI's. That found a failure that would have broken the first CI run (mypy on a machine
+without the optional `piper` package). The image scan found that the only Python vulnerabilities
+were in pip itself, which is now removed from the runtime image.

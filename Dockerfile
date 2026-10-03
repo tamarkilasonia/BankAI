@@ -9,25 +9,28 @@
 # Two stages: dependencies are installed into a virtualenv in a builder stage, and only
 # that virtualenv and the application files are copied into the final image.
 
-ARG PYTHON_IMAGE=python:3.12.15-slim-bookworm
+# The base image is written out in both stages (not an ARG) so that Dependabot can update it.
 
 # --- 1. dependencies ---------------------------------------------------------------------
-FROM ${PYTHON_IMAGE} AS builder
+FROM python:3.12.15-slim-bookworm AS builder
 
 ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PIP_ROOT_USER_ACTION=ignore
 RUN python -m venv /opt/venv
 ENV PATH=/opt/venv/bin:$PATH
+# A current pip for the build (the one bundled with Python has known CVEs).
+RUN pip install pip==26.2.1
 
 # Copied before the code, so a code change does not reinstall every dependency.
 COPY requirements.txt requirements-voice.txt ./
 ARG WITH_VOICE=false
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install -r requirements.txt \
-    && if [ "$WITH_VOICE" = "true" ]; then pip install -r requirements-voice.txt; fi
+    && if [ "$WITH_VOICE" = "true" ]; then pip install -r requirements-voice.txt; fi \
+    && pip uninstall --yes pip
 
 # --- 2. runtime -----------------------------------------------------------------------------
-FROM ${PYTHON_IMAGE} AS runtime
+FROM python:3.12.15-slim-bookworm AS runtime
 
 LABEL org.opencontainers.image.title="BankAI" \
       org.opencontainers.image.description="Agentic banking voice assistant prototype - MOCK data only"
@@ -37,9 +40,11 @@ ENV PATH=/opt/venv/bin:$PATH \
     PYTHONDONTWRITEBYTECODE=1 \
     HOME=/tmp
 
-# An unprivileged user. The secrets directory belongs to it, so a Docker volume mounted
-# there starts with that owner and mode 0700.
-RUN groupadd --system --gid 10001 bankai \
+# No package installer at run time: nothing installs packages in a running container, and
+# pip was the only Python package the image scan (Trivy) flagged. Then an unprivileged user;
+# the secrets directory belongs to it, so a Docker volume mounted there gets that owner, 0700.
+RUN PIP_ROOT_USER_ACTION=ignore python -m pip uninstall --yes --quiet pip \
+    && groupadd --system --gid 10001 bankai \
     && useradd --system --uid 10001 --gid bankai --no-create-home --shell /usr/sbin/nologin bankai \
     && mkdir -p /var/lib/bankai/secrets \
     && chown bankai:bankai /var/lib/bankai/secrets \

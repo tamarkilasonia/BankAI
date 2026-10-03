@@ -125,8 +125,9 @@ def test_the_image_runs_as_an_unprivileged_user() -> None:
 
 def test_the_image_has_a_health_check_and_a_pinned_base() -> None:
     assert re.search(r"^HEALTHCHECK ", DOCKERFILE, re.MULTILINE)
-    base = re.search(r"^ARG PYTHON_IMAGE=(\S+)", DOCKERFILE, re.MULTILINE)
-    assert base and re.fullmatch(r"python:3\.12\.\d+-slim-\w+", base.group(1))  # exact version, never :latest
+    bases = re.findall(r"^FROM (\S+)", DOCKERFILE, re.MULTILINE)
+    assert len(bases) == 2 and len(set(bases)) == 1  # builder and runtime: the same Python
+    assert re.fullmatch(r"python:3\.12\.\d+-slim-\w+", bases[0])  # an exact version, never :latest
     assert not re.search(r"^ENV .*(SECRET|PASSWORD|API_KEY)", DOCKERFILE, re.MULTILINE)
 
 
