@@ -5,7 +5,7 @@
 > component is able to move money.
 
 This document is the engineering design: what the components are, why they are
-shaped this way, and what is still risky. The README (phase 13) summarises it.
+shaped this way, and what is still risky. The [README](../README.md) summarises it.
 
 ---
 
@@ -194,7 +194,7 @@ or the offline provider.
 | 10 | Testing | Fill gaps: security suite, voice, end-to-end; ≥80% coverage | ✅ Done |
 | 11 | Docker | Dockerfile, compose: backend, mcp-server, database (pgvector), init job | ✅ Done |
 | 12 | CI/CD | Lint → type-check → unit → integration (PG service) → coverage → image build | ✅ Done |
-| 13 | Docs | README, architecture diagrams, INTERVIEW.md | Next |
+| 13 | Docs | README, architecture diagrams, INTERVIEW.md | ✅ Done |
 
 Testing is not deferred to phase 10: every phase ships with its tests.
 

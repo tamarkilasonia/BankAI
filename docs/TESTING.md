@@ -5,18 +5,18 @@ project, not an afterthought: the assistant is checked by ordinary example tests
 evaluation dataset that scores the AI's behaviour, and by techniques that check the tests
 themselves (property-based testing, mutation testing, random test order).
 
-Numbers in this document are from the phase 10 run on 2026-10-03, updated for phases 11 (Docker) and 12 (CI).
+Numbers in this document are from the phase 10 run on 2026-10-03, updated for phases 11-13 (Docker, CI, documentation).
 
 ---
 
 ## 1. In one minute
 
-- **1,495 tests** in `tests/` (counting each parametrized case). The 1,436 in the default lane
+- **1,511 tests** in `tests/` (counting each parametrized case). The 1,452 in the default lane
   need no network, no API key, no database server and no LLM, and run in about a minute.
 - Five **opt-in lanes** use real infrastructure: PostgreSQL + pgvector, a local LLM
   (Ollama), the local speech models, headless Chrome, and the Docker Compose stack. A lane
   whose infrastructure is missing is *skipped* locally. In CI it *fails*: CI sets
-  `REQUIRE_INTEGRATION_DB=1` and `REQUIRE_DOCKER=1`.
+  `REQUIRE_INTEGRATION_DB=1`, `REQUIRE_BROWSER=1` and `REQUIRE_DOCKER=1`.
 - **Coverage is 99.8%** of `app/` and `scripts/` (branch coverage, with PostgreSQL).
   CI fails below 95%. Coverage only shows that code *ran*, so:
 - **Mutation testing** breaks 33 defences on purpose (an authorization check, the
@@ -35,7 +35,7 @@ Numbers in this document are from the phase 10 run on 2026-10-03, updated for ph
 | what | command |
 |---|---|
 | everything that needs no services | `pytest` |
-| + PostgreSQL integration tests | `docker compose up -d db` (or a local PostgreSQL), then `REQUIRE_INTEGRATION_DB=1 pytest` |
+| + PostgreSQL integration tests | a local PostgreSQL with pgvector and a `bankai_test` database: `REQUIRE_INTEGRATION_DB=1 pytest`. Or the compose database: `docker compose up -d --wait database`, once `docker compose exec database createdb -U bankai bankai_test`, then `TEST_DATABASE_URL=postgresql+asyncpg://bankai:bankai@localhost:5433/bankai_test REQUIRE_INTEGRATION_DB=1 pytest` |
 | with coverage | `pytest --cov` (report in the terminal; `--cov-report=html` for a browsable one) |
 | live LLM tests (local Ollama) | `ollama serve`, `ollama pull qwen2.5:3b`, then `pytest -m llm` |
 | speech model tests | `pip install -r requirements-voice.txt`, `python -m scripts.download_voice_models`, `pytest -m voice` |
@@ -57,7 +57,7 @@ tested too (`tests/unit/test_ci_workflow.py`): pinned actions, no silent skips, 
 
 | layer | folder | what is real | what is replaced | tests |
 |---|---|---|---|---|
-| unit | `tests/unit` | the function under test, SQLite in memory | LLM, network | 643 |
+| unit | `tests/unit` | the function under test, SQLite in memory | LLM, network | 659 |
 | property | `tests/property` | guard, grounding, calculators, MCP server | - (inputs are generated) | 17 |
 | safety | `tests/safety` | whole agent over MCP, seeded bank | LLM (scripted) | 168 |
 | integration | `tests/integration` | agent + MCP + services + database; **PostgreSQL**, pgvector, Alembic, MCP over HTTP | LLM (scripted) | 114 |
@@ -140,6 +140,17 @@ test named in this table must exist: `tests/unit/test_docs.py` checks that on ev
 | invalid audio | `tests/voice/test_audio_and_speech.py::test_bad_audio_is_rejected_with_a_clear_message`, `tests/voice/test_local_models.py::test_a_damaged_recording_is_invalid_audio` |
 | unsupported audio | `tests/voice/test_audio_and_speech.py::test_formats_are_recognized_by_content`, `tests/api/test_banking_and_voice.py::test_bad_audio` |
 | TTS errors | `tests/voice/test_providers.py::test_openai_tts_errors`, `tests/voice/test_pipeline.py::test_tts_failure_keeps_the_text_answer` |
+
+**CI and documentation (spec §21, §23-24, §30)**
+
+| requirement | tests |
+|---|---|
+| pipeline order: install → lint → unit → integration → coverage → image | `tests/unit/test_ci_workflow.py::test_the_pipeline_follows_the_specification` |
+| no real API keys in CI; LLM tests kept separate | `tests/unit/test_ci_workflow.py::test_workflows_only_read_the_repository_and_use_no_secrets`, `tests/unit/test_ci_workflow.py::test_every_test_marker_runs_in_some_workflow` |
+| README with the 23 required sections | `tests/unit/test_readme.py::test_the_readme_has_the_sections_the_specification_requires`, `tests/unit/test_readme.py::test_every_relative_link_and_anchor_resolves` |
+| Mermaid architecture diagram | `tests/unit/test_readme.py::test_the_architecture_diagram_shows_every_path_the_specification_names` |
+| published metrics are not hard-coded | `tests/unit/test_readme.py::test_the_readme_evaluation_numbers_are_the_stored_reports` |
+| INTERVIEW.md with at least 40 questions | `tests/unit/test_readme.py::test_the_interview_guide_has_at_least_forty_numbered_questions` |
 
 ## 5. Test doubles - and what each one could hide
 

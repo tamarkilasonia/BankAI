@@ -62,7 +62,7 @@ Optional features are separate compose files, added with `-f`:
 # Offline (default): no LLM, no models, works anywhere
 docker compose up --build
 
-# With a local LLM: Ollama runs on the host (ollama pull qwen2.5:3b nomic-embed-text)
+# With a local LLM: Ollama runs on the host (ollama pull qwen2.5:3b; ollama pull nomic-embed-text)
 docker compose -f docker-compose.yml -f docker-compose.ollama.yml up --build
 
 # + speech: download the models once on the host (python -m scripts.download_voice_models)
