@@ -834,5 +834,3 @@ Latency was measured on an Apple M4 laptop, with Ollama running locally.
 
 ---
 
-Built as a portfolio project for an AI engineering internship. Questions an interviewer might ask,
-with answers: [INTERVIEW.md](INTERVIEW.md).
