@@ -224,7 +224,9 @@ def test_end_to_end_in_headless_chrome(browser: str, live_server: str) -> None:
         capture_output=True,
         text=True,
         check=False,
-        env={**os.environ, "CHROME": browser},
+        # SLOW_FIRST_LOAD: the page arrives slowly, as on a busy CI machine, where the test once
+        # read the page before it had loaded ("page error: Uncaught") - it must wait instead
+        env={**os.environ, "CHROME": browser, "SLOW_FIRST_LOAD": "1"},
         timeout=240,
     )
     assert result.returncode == 0, result.stdout + result.stderr

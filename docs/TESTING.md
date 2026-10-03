@@ -291,7 +291,12 @@ A flaky test is worse than no test, because people learn to ignore red builds. S
 - Hypothesis failures are **reproducible**: the failing example is printed, shrunk and saved;
 - random test order prints its **seed**;
 - the evaluation run is checked to give the same result twice
-  (`tests/evaluation/test_runner.py::test_offline_run_is_deterministic`).
+  (`tests/evaluation/test_runner.py::test_offline_run_is_deterministic`);
+- the one flaky test CI has found so far, the headless Chrome test, was **reproduced and fixed,
+  not retried**: a race between loading the page and checking it, and too short a wait for
+  Chrome to start. The test now always runs with a slowed-down first page load, so the slow-machine
+  case is covered on every run (`tests/frontend/test_frontend.py::test_end_to_end_in_headless_chrome`;
+  details in [CI.md](CI.md)).
 
 ## 10. Coverage
 
