@@ -52,8 +52,10 @@ _SENSITIVE_VALUE_PATTERNS: list[tuple[re.Pattern[str], str]] = [
 ]
 
 # Attributes every LogRecord has; anything else came from `extra=` and is a field.
+# (uvicorn adds "color_message": the same text with terminal colour codes - noise in JSON.)
 _STANDARD_RECORD_ATTRS = frozenset(
-    logging.LogRecord("", 0, "", 0, "", None, None).__dict__.keys() | {"message", "asctime", "taskName"}
+    logging.LogRecord("", 0, "", 0, "", None, None).__dict__.keys()
+    | {"message", "asctime", "taskName", "color_message"}
 )
 
 

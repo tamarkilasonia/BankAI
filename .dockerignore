@@ -1,0 +1,15 @@
+# An allowlist: everything is excluded from the build context except what the image
+# needs. So .env (secrets), .git, the virtualenv, tests, caches and the downloaded speech
+# models can never end up in an image - even ones added to the repository later.
+*
+!app/
+!scripts/
+!alembic/
+!alembic.ini
+!knowledge_base/
+!frontend/
+!requirements.txt
+!requirements-voice.txt
+
+**/__pycache__
+**/*.pyc

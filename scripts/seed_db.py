@@ -5,6 +5,7 @@ Usage (from the project root, after ``alembic upgrade head``)::
     python -m scripts.seed_db                      # seed an empty database
     python -m scripts.seed_db --reset              # replace existing mock data
     python -m scripts.seed_db --anchor 2026-09-28  # pin "today" of the mock history
+    python -m scripts.seed_db --if-empty           # seed only a fresh database (container start-up)
 """
 
 import argparse
@@ -18,7 +19,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 from app.core.config import get_settings
 from app.core.logging import configure_logging, get_logger
 from app.core.time import BANK_TZ
-from app.database.seed import SeedError, seed_database
+from app.database.seed import SeedError, has_mock_data, seed_database
 from app.database.session import create_engine
 
 logger = get_logger("scripts.seed_db")
@@ -32,7 +33,11 @@ def _anchor(value: str) -> datetime:
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Seed the BankAI database with MOCK data.")
-    parser.add_argument("--reset", action="store_true", help="delete existing mock data first")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--reset", action="store_true", help="delete existing mock data first")
+    mode.add_argument(
+        "--if-empty", action="store_true", help="do nothing if the database already has mock data"
+    )
     parser.add_argument(
         "--anchor",
         type=_anchor,
@@ -51,6 +56,9 @@ async def main(argv: list[str] | None = None) -> int:
     engine = create_engine(settings.database_url)
     try:
         async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+            if args.if_empty and await has_mock_data(session):
+                logger.info("seed.skipped", extra={"reason": "the database already has mock data"})
+                return 0
             summary = await seed_database(
                 session,
                 anchor=cast(datetime | None, args.anchor),

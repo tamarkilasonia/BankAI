@@ -47,6 +47,18 @@ async def test_refuses_to_seed_twice_and_reset_succeeds(sqlite_file_url: str) ->
     assert await user_count(sqlite_file_url) == 10
 
 
+async def test_if_empty_seeds_once_and_then_does_nothing(sqlite_file_url: str) -> None:
+    """The Docker init job runs on every `docker compose up`: it must never duplicate data."""
+    assert await main(["--if-empty", "--anchor", "2026-09-28"]) == 0
+    assert await main(["--if-empty"]) == 0
+    assert await user_count(sqlite_file_url) == 10
+
+
+def test_if_empty_and_reset_exclude_each_other() -> None:
+    with pytest.raises(SystemExit):
+        parse_args(["--if-empty", "--reset"])
+
+
 def test_anchor_means_end_of_day_in_bank_time() -> None:
     # 23:59:59 in Tbilisi (UTC+4) is 19:59:59 UTC.
     assert _anchor("2026-09-28") == datetime(2026, 9, 28, 19, 59, 59, tzinfo=UTC)

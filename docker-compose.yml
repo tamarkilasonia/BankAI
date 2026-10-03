@@ -1,27 +1,123 @@
-# Phase 1: database only. The backend and MCP server services are added in phase 11.
+# BankAI - the whole stack, with MOCK data only (a prototype, not a production deployment).
 #
-#   docker compose up -d db
+#   docker compose up --build        then open http://localhost:8000
 #
-# The image is PostgreSQL 16 with the pgvector extension pre-installed
-# (needed for RAG in phase 4).
+# Services:
+#   database    PostgreSQL 16 + pgvector: accounts, transactions, knowledge-base vectors, audit log
+#   init        one-shot job: secrets -> migrations -> MOCK seed (first start only) -> knowledge-base index
+#   mcp-server  the 8 banking tools over MCP; internal network only, NOT reachable from the host
+#   backend     FastAPI: the API and the web UI; its agent calls the tools on mcp-server
+#
+# Default mode is offline (rule-based routing, template answers, hashing embeddings): no LLM,
+# no API key, no internet needed. Optional add-ons (see docs/DOCKER.md):
+#   -f docker-compose.ollama.yml   use a local Ollama on the host (LLM + embeddings)
+#   -f docker-compose.voice.yml    local speech-to-text and text-to-speech
+#
+# Secrets are generated on first start into the "secrets" volume - nothing secret is in this
+# file, the repository or the image. To set your own, put them in .env (see .env.example).
+
+x-app: &app
+  image: bankai:local
+  build:
+    context: .
+  # Hardening: nothing in the image can be modified at run time, no privilege escalation,
+  # no Linux capabilities (none are needed to serve HTTP on a port above 1024).
+  read_only: true
+  tmpfs: [/tmp]
+  security_opt: ["no-new-privileges:true"]
+  cap_drop: [ALL]
+  extra_hosts: ["host.docker.internal:host-gateway"]  # the host's Ollama (Linux needs this line)
+  volumes:
+    - secrets:/var/lib/bankai/secrets
+  logging:
+    options: { max-size: "10m", max-file: "3" }
+
+x-app-env: &app-env
+  ENVIRONMENT: ${ENVIRONMENT:-development}
+  LOG_LEVEL: ${LOG_LEVEL:-INFO}
+  LOG_FORMAT: json
+  DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-bankai}:${POSTGRES_PASSWORD:-bankai}@database:5432/${POSTGRES_DB:-bankai}
+  SECRETS_DIR: /var/lib/bankai/secrets
+  MCP_SERVER_URL: http://mcp-server:8001/mcp
+  LLM_PROVIDER: none
+  EMBEDDING_PROVIDER: hashing
+  VECTOR_STORE: pgvector
+  STT_PROVIDER: none
+  TTS_PROVIDER: none
 
 services:
-  db:
+  database:
     image: pgvector/pgvector:pg16
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-bankai}
+      # A local default for a database of MOCK data that only listens on 127.0.0.1.
+      # Set POSTGRES_PASSWORD in .env for anything else.
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-bankai}
       POSTGRES_DB: ${POSTGRES_DB:-bankai}
     ports:
-      # Change POSTGRES_PORT if a local PostgreSQL already uses 5432.
-      - "${POSTGRES_PORT:-5432}:5432"
+      # For tools on the host (psql, tests). 5433, not 5432: a local PostgreSQL often has 5432.
+      - "127.0.0.1:${POSTGRES_PORT:-5433}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-bankai} -d ${POSTGRES_DB:-bankai}"]
       interval: 5s
       timeout: 3s
-      retries: 10
+      retries: 20
+    restart: unless-stopped
+
+  init:
+    <<: *app
+    command:
+      - sh
+      - -c
+      - >-
+        python -m scripts.generate_secrets
+        && alembic upgrade head
+        && python -m scripts.seed_db --if-empty
+        && python -m scripts.ingest_knowledge_base
+    environment:
+      <<: *app-env
+      # Only the init job sees secrets given in .env; it writes them to the secrets volume.
+      MCP_AUTH_SECRET: ${MCP_AUTH_SECRET:-}
+      API_SESSION_SECRET: ${API_SESSION_SECRET:-}
+      OPERATOR_API_KEY: ${OPERATOR_API_KEY:-}
+    healthcheck: { disable: true }  # a one-shot job: its exit code is what counts
+    depends_on:
+      database: { condition: service_healthy }
+    restart: "no"
+
+  mcp-server:
+    <<: *app
+    command: ["python", "-m", "app.mcp"]
+    environment:
+      <<: *app-env
+      MCP_HOST: 0.0.0.0
+      MCP_PORT: "8001"
+      MCP_ALLOWED_HOSTS: '["mcp-server:*", "localhost:*", "127.0.0.1:*"]'
+    # No "ports": only containers on this network can reach the tools.
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/health', timeout=4)"]
+      interval: 10s
+      timeout: 5s
+      start_period: 20s
+      retries: 5
+    depends_on:
+      init: { condition: service_completed_successfully }
+    restart: unless-stopped
+
+  backend:
+    <<: *app
+    environment:
+      <<: *app-env
+      MCP_TRANSPORT: http
+    ports:
+      - "127.0.0.1:${BACKEND_PORT:-8000}:8000"
+    depends_on:
+      init: { condition: service_completed_successfully }
+      mcp-server: { condition: service_healthy }
+    restart: unless-stopped
 
 volumes:
   pgdata:
+  secrets:

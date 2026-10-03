@@ -1,0 +1,22 @@
+# Add-on: local speech-to-text (Whisper) and text-to-speech (Piper, incl. a Georgian voice).
+#
+#   python -m scripts.download_voice_models        (on the host, once: fills ./models, ~600 MB)
+#   docker compose -f docker-compose.yml -f docker-compose.voice.yml up --build
+#
+# Only the backend speaks and listens. It gets its own image tag with the speech libraries,
+# and the models are mounted read-only instead of being copied into the image.
+
+services:
+  backend:
+    image: bankai:local-voice
+    build:
+      args:
+        WITH_VOICE: "true"
+    environment:
+      STT_PROVIDER: faster_whisper
+      STT_MODEL: ${STT_MODEL:-small}
+      STT_MODEL_DIR: /models/whisper
+      TTS_PROVIDER: piper
+      TTS_VOICES_DIR: /models/piper
+    volumes:
+      - ./models:/models:ro

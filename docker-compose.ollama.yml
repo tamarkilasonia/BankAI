@@ -1,0 +1,27 @@
+# Add-on: use a local Ollama on the host for the LLM and the embeddings.
+#
+#   ollama serve                                   (on the host; ollama pull qwen2.5:3b nomic-embed-text)
+#   docker compose -f docker-compose.yml -f docker-compose.ollama.yml up --build
+#
+# Ollama stays on the host, not in a container: Docker on a Mac cannot use the Apple GPU,
+# so the model would run several times slower inside Docker. The containers reach it
+# through host.docker.internal (OLLAMA_URL to point elsewhere).
+#
+# The init job re-indexes the knowledge base with the new embedder (each embedder has its
+# own rows, so switching back and forth never mixes vector spaces).
+
+x-ollama: &ollama
+  LLM_PROVIDER: openai_compatible
+  LLM_BASE_URL: ${OLLAMA_URL:-http://host.docker.internal:11434}/v1
+  LLM_MODEL: ${LLM_MODEL:-qwen2.5:3b}
+  EMBEDDING_PROVIDER: openai_compatible
+  EMBEDDING_BASE_URL: ${OLLAMA_URL:-http://host.docker.internal:11434}/v1
+  EMBEDDING_MODEL: ${EMBEDDING_MODEL:-nomic-embed-text}
+
+services:
+  init:
+    environment: *ollama
+  mcp-server:
+    environment: *ollama
+  backend:
+    environment: *ollama

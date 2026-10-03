@@ -256,6 +256,39 @@ MUTANTS: tuple[Mutant, ...] = (
         ("tests/voice/test_pipeline.py",),
         "a garbled, low-confidence transcript is acted on",
     ),
+    # --- containers ----------------------------------------------------------------------------
+    Mutant(
+        "docker-root-user",
+        "Dockerfile",
+        "USER bankai",
+        "USER root",
+        ("tests/unit/test_docker_config.py",),
+        "the containers run as root",
+    ),
+    Mutant(
+        "docker-mcp-published",
+        "docker-compose.yml",
+        '    # No "ports": only containers on this network can reach the tools.',
+        '    ports: ["127.0.0.1:8001:8001"]',
+        ("tests/unit/test_docker_config.py",),
+        "the MCP tool server is reachable from outside the Docker network",
+    ),
+    Mutant(
+        "docker-context-open",
+        ".dockerignore",
+        "*\n!app/",
+        "!app/",
+        ("tests/unit/test_docker_config.py",),
+        "the build context is no longer an allowlist: .env could end up in the image",
+    ),
+    Mutant(
+        "docker-missing-runtime-dependency",
+        "requirements.txt",
+        "aiosqlite==0.22.1",
+        "# aiosqlite removed",
+        ("tests/unit/test_docker_config.py",),
+        'the image lacks aiosqlite: "Run evaluation" crashes (found by building the image)',
+    ),
     # --- web UI and evaluation ------------------------------------------------------------
     Mutant(
         "ui-html-sink",
