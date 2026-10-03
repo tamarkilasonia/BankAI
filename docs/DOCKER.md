@@ -127,6 +127,7 @@ printed or logged. `docker compose down -v` deletes them together with the data.
 | published ports bind to `127.0.0.1` | the demo is not exposed to the local network |
 | `.dockerignore` is an allowlist | `.env`, `.git`, tests and models can never enter the build context |
 | multi-stage build | the final image gets the installed packages and the application only; the build stage's download cache and requirement files stay behind |
+| no pip in the final image | nothing installs packages in a running container; pip held the only Python vulnerabilities the image scan found (phase 12) |
 | base image pinned to an exact version (`python:3.12.15-slim-bookworm`) | reproducible builds; same Python as the tests |
 | health checks on every service | compose starts each service only when the ones it needs are healthy; `docker compose ps` shows the state (Compose does not restart an unhealthy container by itself - only one that exits) |
 | JSON logs, rotated (`10m` × 3) | machine-readable, and the disk cannot fill up |
@@ -179,4 +180,5 @@ printed or logged. `docker compose down -v` deletes them together with the data.
 - **No TLS.** The demo listens on localhost only. A real deployment would sit behind a TLS proxy.
 - **The default database password** is a known value. It is acceptable for MOCK data on
   127.0.0.1 and nothing else.
-- **Image signing, vulnerability scanning and digest pinning** belong in the CI pipeline (phase 12).
+- **Vulnerability scanning** runs in CI (Trivy, see [CI.md](CI.md)). Image signing and pinning the
+  base image by digest are not done yet.

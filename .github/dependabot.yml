@@ -1,0 +1,35 @@
+# Dependency updates as pull requests, once a month, grouped so each ecosystem is one PR.
+# Every update goes through the full CI pipeline before it can be merged.
+#   pip             requirements*.txt (exact pins)
+#   github-actions  the workflow actions (pinned to commit SHAs; Dependabot updates the SHA
+#                   and the version comment next to it)
+#   docker          the Python base image in the Dockerfile
+# Dependabot reads this file from the default branch (main).
+
+version: 2
+updates:
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      python:
+        patterns: ["*"]
+    open-pull-requests-limit: 3
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      actions:
+        patterns: ["*"]
+
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: monthly
+    ignore:
+      # Python 3.13+ is a deliberate upgrade (and a test run), not a routine bump.
+      - dependency-name: python
+        update-types: ["version-update:semver-minor", "version-update:semver-major"]

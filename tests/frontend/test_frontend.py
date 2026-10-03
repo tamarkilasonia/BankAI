@@ -207,15 +207,24 @@ def live_server(tmp_path: Path) -> Iterator[str]:
         server.wait(timeout=10)
 
 
+@pytest.fixture
+def browser() -> str:
+    """Chrome, or a skip - a failure when REQUIRE_BROWSER=1 (CI), so the test never vanishes silently."""
+    if CHROME is None or NODE is None:
+        if os.getenv("REQUIRE_BROWSER") == "1":
+            pytest.fail("Chrome and node are required (REQUIRE_BROWSER=1)")
+        pytest.skip("needs Chrome and node")
+    return CHROME
+
+
 @pytest.mark.ui
-@pytest.mark.skipif(CHROME is None or NODE is None, reason="needs Chrome and node")
-def test_end_to_end_in_headless_chrome(live_server: str) -> None:
+def test_end_to_end_in_headless_chrome(browser: str, live_server: str) -> None:
     result = subprocess.run(  # noqa: S603
         [NODE, str(PROJECT_ROOT / "tests/frontend/ui_smoke.mjs"), live_server, OPERATOR_KEY],
         capture_output=True,
         text=True,
         check=False,
-        env={**os.environ, "CHROME": CHROME or ""},
+        env={**os.environ, "CHROME": browser},
         timeout=240,
     )
     assert result.returncode == 0, result.stdout + result.stderr

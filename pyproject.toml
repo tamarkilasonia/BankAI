@@ -50,8 +50,10 @@ warn_unreachable = true
 pretty = true
 
 [[tool.mypy.overrides]]
-module = ["pgvector.*", "faster_whisper.*"]
-ignore_missing_imports = true   # these ship no type hints (faster_whisper is optional: requirements-voice.txt)
+module = ["pgvector.*", "faster_whisper.*", "piper.*"]
+# pgvector ships no type hints; faster_whisper and piper are optional (requirements-voice.txt) -
+# found by running CI's steps in a clean virtualenv, where they are not installed.
+ignore_missing_imports = true
 
 # -------------------------------------------------------------- pytest -----
 [tool.pytest.ini_options]

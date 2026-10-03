@@ -5,13 +5,13 @@ project, not an afterthought: the assistant is checked by ordinary example tests
 evaluation dataset that scores the AI's behaviour, and by techniques that check the tests
 themselves (property-based testing, mutation testing, random test order).
 
-Numbers in this document are from the phase 10 run on 2026-10-03, updated for phase 11 (Docker).
+Numbers in this document are from the phase 10 run on 2026-10-03, updated for phases 11 (Docker) and 12 (CI).
 
 ---
 
 ## 1. In one minute
 
-- **1,485 tests** in `tests/` (counting each parametrized case). The 1,426 in the default lane
+- **1,495 tests** in `tests/` (counting each parametrized case). The 1,436 in the default lane
   need no network, no API key, no database server and no LLM, and run in about a minute.
 - Five **opt-in lanes** use real infrastructure: PostgreSQL + pgvector, a local LLM
   (Ollama), the local speech models, headless Chrome, and the Docker Compose stack. A lane
@@ -19,9 +19,9 @@ Numbers in this document are from the phase 10 run on 2026-10-03, updated for ph
   `REQUIRE_INTEGRATION_DB=1` and `REQUIRE_DOCKER=1`.
 - **Coverage is 99.8%** of `app/` and `scripts/` (branch coverage, with PostgreSQL).
   CI fails below 95%. Coverage only shows that code *ran*, so:
-- **Mutation testing** breaks 30 defences on purpose (an authorization check, the
+- **Mutation testing** breaks 33 defences on purpose (an authorization check, the
   injection decoder, log redaction...) and checks that the tests notice. Result:
-  **30/30 caught**.
+  **33/33 caught**.
 - **Property-based tests** (Hypothesis) generate thousands of disguised attacks, amounts,
   dates and malformed tool calls. They check rules that must hold for *every* input.
 - Tests run in a **random order** on every run (`pytest-randomly`), so no test can depend
@@ -50,11 +50,14 @@ Numbers in this document are from the phase 10 run on 2026-10-03, updated for ph
 
 Markers (`pyproject.toml`, `--strict-markers`): `postgres`, `llm`, `voice`, `ui`, `docker`.
 
+All of this runs on every push in GitHub Actions - see [CI.md](CI.md). The pipeline itself is
+tested too (`tests/unit/test_ci_workflow.py`): pinned actions, no silent skips, every marker run.
+
 ## 3. The layers
 
 | layer | folder | what is real | what is replaced | tests |
 |---|---|---|---|---|
-| unit | `tests/unit` | the function under test, SQLite in memory | LLM, network | 633 |
+| unit | `tests/unit` | the function under test, SQLite in memory | LLM, network | 643 |
 | property | `tests/property` | guard, grounding, calculators, MCP server | - (inputs are generated) | 17 |
 | safety | `tests/safety` | whole agent over MCP, seeded bank | LLM (scripted) | 168 |
 | integration | `tests/integration` | agent + MCP + services + database; **PostgreSQL**, pgvector, Alembic, MCP over HTTP | LLM (scripted) | 114 |
@@ -213,8 +216,8 @@ $ python -m scripts.mutation_test
   KILLED    logs-unredacted             API keys and passwords typed by a customer are written to logs
   KILLED    ui-html-sink                agent answers and attack strings are rendered as HTML (XSS)
   KILLED    eval-isolation-scorer       the evaluation reports 100% data isolation whatever leaked
-  ... (30 in total, incl. container mistakes such as a root user or a published MCP port)
-Mutation score: 30/30 killed
+  ... (33 in total, incl. container and CI mistakes: a root user, a published MCP port, an unpinned action)
+Mutation score: 33/33 killed
 ```
 
 The mutants are curated, not generated: a generic tool (mutmut) makes thousands of mutants and

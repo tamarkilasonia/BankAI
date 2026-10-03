@@ -1,0 +1,101 @@
+# Tests that need real models - separate from ci.yml, as the specification asks ("separate
+# tests that require external LLM APIs"). Started by hand (Actions -> Live models -> Run
+# workflow), because CI machines have no GPU: a 3B model on two CPU cores is slow, and the
+# results of a real model vary a little from run to run.
+#
+#   llm    qwen2.5:3b and nomic-embed-text in an Ollama container: the live LLM tests and the
+#          full evaluation (246 cases) with the real model
+#   voice  Whisper and Piper with the real models: recognition, synthesis, Georgian
+#
+# No API key is involved: the models are open and run inside the job.
+
+name: Live models
+
+on:
+  workflow_dispatch:
+    inputs:
+      llm_model:
+        description: Ollama model for the agent
+        default: qwen2.5:3b
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  PYTHON_VERSION: "3.12"
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+
+jobs:
+  llm:
+    name: Live LLM tests and evaluation
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    services:
+      ollama:
+        image: ollama/ollama:0.35.1
+        ports: ["11434:11434"]
+    env:
+      REQUIRE_LLM: "1"
+      LIVE_LLM_BASE_URL: http://localhost:11434/v1
+      LIVE_LLM_MODEL: ${{ inputs.llm_model }}
+      LLM_PROVIDER: openai_compatible
+      LLM_BASE_URL: http://localhost:11434/v1
+      LLM_MODEL: ${{ inputs.llm_model }}
+      LLM_TIMEOUT_SECONDS: "300" # CPU only
+      EMBEDDING_PROVIDER: openai_compatible
+      EMBEDDING_BASE_URL: http://localhost:11434/v1
+      EMBEDDING_MODEL: nomic-embed-text
+      VECTOR_STORE: memory # no database in this job: the knowledge base is indexed in memory
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: requirements*.txt
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+      - name: Pull the models
+        run: |
+          for model in "$LLM_MODEL" "$EMBEDDING_MODEL"; do
+            echo "pulling $model"
+            curl --fail --silent --show-error http://localhost:11434/api/pull \
+              -d "{\"model\": \"$model\", \"stream\": false}"
+            echo
+          done
+      - name: Live LLM tests
+        run: pytest -m llm -p no:randomly
+      - name: Evaluation with the real model (246 cases)
+        run: |
+          mkdir -p reports
+          python -m scripts.run_evaluation --no-save --quiet \
+            --report reports/evaluation-live.md --json reports/evaluation-live.json
+          cat reports/evaluation-live.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload the report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: evaluation-live
+          path: reports/
+          if-no-files-found: warn
+
+  voice:
+    name: Speech model tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      REQUIRE_VOICE: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: requirements*.txt
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt -r requirements-voice.txt
+      - name: Download the speech models (about 600 MB)
+        run: python -m scripts.download_voice_models
+      - name: Speech model tests (Whisper, Piper, Georgian)
+        run: pytest -m voice -p no:randomly

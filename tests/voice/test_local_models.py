@@ -5,6 +5,7 @@ missing (CI does not install them). Run with: pytest -m voice
 """
 
 import io
+import os
 import re
 from pathlib import Path
 
@@ -35,6 +36,8 @@ def _models_available() -> bool:
 
 
 if not _models_available():
+    if os.getenv("REQUIRE_VOICE") == "1":  # the live-models workflow: missing models are a failure
+        pytest.fail("local voice models not installed (REQUIRE_VOICE=1)", pytrace=False)
     pytest.skip(
         "local voice models not installed (requirements-voice.txt + download)", allow_module_level=True
     )
