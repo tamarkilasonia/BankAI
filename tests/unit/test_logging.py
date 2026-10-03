@@ -95,6 +95,14 @@ def test_json_formatter_redacts_extra_fields_and_message() -> None:
     assert json.loads(line)["api_key"] == REDACTED
 
 
+def test_json_formatter_drops_uvicorns_colour_codes() -> None:
+    """Seen in the Docker logs: uvicorn's records carry a copy of the message with ANSI codes."""
+    payload = json.loads(
+        JsonFormatter().format(make_record("Started", color_message="\x1b[1mStarted\x1b[0m"))
+    )
+    assert "color_message" not in payload and payload["event"] == "Started"
+
+
 def test_json_formatter_includes_exception_details() -> None:
     payload = json.loads(JsonFormatter().format(make_record("failed", exc=True)))
 

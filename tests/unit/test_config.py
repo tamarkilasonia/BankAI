@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 from pydantic import ValidationError
 
@@ -73,6 +75,21 @@ def test_get_settings_is_cached_until_cleared(monkeypatch: pytest.MonkeyPatch) -
 
     get_settings.cache_clear()
     assert get_settings().app_name == "Changed"
+
+
+@pytest.mark.usefixtures("reset_app_state")
+def test_secrets_can_come_from_a_secrets_directory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Docker: the init job writes secret files and SECRETS_DIR points the settings at them."""
+    from_file, from_env = "secret-from-a-file-0123456789abcdefgh", "secret-from-the-environment-0123456789"
+    (tmp_path / "mcp_auth_secret").write_text(from_file)
+    monkeypatch.delenv("MCP_AUTH_SECRET", raising=False)
+    monkeypatch.setenv("SECRETS_DIR", str(tmp_path))
+
+    assert get_settings().require_mcp_auth_secret() == from_file
+
+    get_settings.cache_clear()
+    monkeypatch.setenv("MCP_AUTH_SECRET", from_env)
+    assert get_settings().require_mcp_auth_secret() == from_env  # the environment wins
 
 
 # --- MCP settings ---------------------------------------------------------------

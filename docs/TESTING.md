@@ -5,22 +5,23 @@ project, not an afterthought: the assistant is checked by ordinary example tests
 evaluation dataset that scores the AI's behaviour, and by techniques that check the tests
 themselves (property-based testing, mutation testing, random test order).
 
-Numbers in this document are from the phase 10 run on 2026-10-03.
+Numbers in this document are from the phase 10 run on 2026-10-03, updated for phase 11 (Docker).
 
 ---
 
 ## 1. In one minute
 
-- **1,446 tests** in `tests/` (counting each parametrized case). The 1,394 in the default lane
+- **1,485 tests** in `tests/` (counting each parametrized case). The 1,426 in the default lane
   need no network, no API key, no database server and no LLM, and run in about a minute.
-- Four **opt-in lanes** use real infrastructure: PostgreSQL + pgvector, a local LLM
-  (Ollama), the local speech models, and headless Chrome. A lane whose infrastructure is
-  missing is *skipped* locally. In CI it *fails*: CI sets `REQUIRE_INTEGRATION_DB=1`.
+- Five **opt-in lanes** use real infrastructure: PostgreSQL + pgvector, a local LLM
+  (Ollama), the local speech models, headless Chrome, and the Docker Compose stack. A lane
+  whose infrastructure is missing is *skipped* locally. In CI it *fails*: CI sets
+  `REQUIRE_INTEGRATION_DB=1` and `REQUIRE_DOCKER=1`.
 - **Coverage is 99.8%** of `app/` and `scripts/` (branch coverage, with PostgreSQL).
   CI fails below 95%. Coverage only shows that code *ran*, so:
-- **Mutation testing** breaks 26 defences on purpose (an authorization check, the
+- **Mutation testing** breaks 30 defences on purpose (an authorization check, the
   injection decoder, log redaction...) and checks that the tests notice. Result:
-  **26/26 caught**.
+  **30/30 caught**.
 - **Property-based tests** (Hypothesis) generate thousands of disguised attacks, amounts,
   dates and malformed tool calls. They check rules that must hold for *every* input.
 - Tests run in a **random order** on every run (`pytest-randomly`), so no test can depend
@@ -39,6 +40,7 @@ Numbers in this document are from the phase 10 run on 2026-10-03.
 | live LLM tests (local Ollama) | `ollama serve`, `ollama pull qwen2.5:3b`, then `pytest -m llm` |
 | speech model tests | `pip install -r requirements-voice.txt`, `python -m scripts.download_voice_models`, `pytest -m voice` |
 | browser end-to-end | needs Chrome and Node: `pytest -m ui` |
+| the Docker stack (build, start, test from outside, remove) | needs Docker: `pytest -m docker` (about 30 s with a cached image) |
 | one layer | `pytest tests/safety`, `pytest tests/property`, ... |
 | more property examples | `HYPOTHESIS_PROFILE=thorough pytest tests/property` (2,000 per property instead of 100) |
 | mutation testing | `python -m scripts.mutation_test` (about a minute) or `--list` |
@@ -46,13 +48,13 @@ Numbers in this document are from the phase 10 run on 2026-10-03.
 | JavaScript unit tests only | `node --test tests/frontend/` |
 | reports | `python -m scripts.run_evaluation`, `python -m scripts.run_safety_suite`, `python -m scripts.evaluate_voice` |
 
-Markers (`pyproject.toml`, `--strict-markers`): `postgres`, `llm`, `voice`, `ui`.
+Markers (`pyproject.toml`, `--strict-markers`): `postgres`, `llm`, `voice`, `ui`, `docker`.
 
 ## 3. The layers
 
 | layer | folder | what is real | what is replaced | tests |
 |---|---|---|---|---|
-| unit | `tests/unit` | the function under test, SQLite in memory | LLM, network | 601 |
+| unit | `tests/unit` | the function under test, SQLite in memory | LLM, network | 633 |
 | property | `tests/property` | guard, grounding, calculators, MCP server | - (inputs are generated) | 17 |
 | safety | `tests/safety` | whole agent over MCP, seeded bank | LLM (scripted) | 168 |
 | integration | `tests/integration` | agent + MCP + services + database; **PostgreSQL**, pgvector, Alembic, MCP over HTTP | LLM (scripted) | 114 |
@@ -61,6 +63,7 @@ Markers (`pyproject.toml`, `--strict-markers`): `postgres`, `llm`, `voice`, `ui`
 | voice | `tests/voice` | audio validation, pipeline; **Whisper and Piper** (marked `voice`) | engines (fakes) in the unmarked tests | 78 |
 | frontend | `tests/frontend` | served files, CSP, JS syntax/unit tests; **headless Chrome** (marked `ui`) | - | 24 |
 | live LLM | `tests/llm` | **qwen2.5:3b via Ollama** | nothing | 13 |
+| containers | `tests/docker` | **the built image and the whole Compose stack** | nothing | 7 |
 
 The many fast tests at the bottom catch most bugs within seconds. The few slow tests at the top
 show that the real parts work together.
@@ -115,6 +118,16 @@ test named in this table must exist: `tests/unit/test_docs.py` checks that on ev
 | no secrets in logs | `tests/unit/test_logging.py::test_redacts_secrets_inside_free_text`, `tests/api/test_auth_and_chat.py::test_every_turn_is_audited_with_secrets_redacted` |
 | no stack traces to users | `tests/api/test_evaluations_and_errors.py::test_unexpected_errors_reveal_nothing` |
 | XSS in the web UI | `tests/frontend/test_frontend.py::test_no_html_injection_sinks`, `tests/frontend/test_frontend.py::test_end_to_end_in_headless_chrome` |
+
+**Containers (spec §20)**
+
+| requirement | tests |
+|---|---|
+| services backend, database, mcp-server | `tests/unit/test_docker_config.py::test_the_services_of_the_specification_exist`, `tests/docker/test_compose_stack.py::test_all_services_are_healthy_and_the_init_job_succeeded` |
+| startable with `docker compose up` | `tests/docker/test_compose_stack.py::test_a_customer_is_answered_through_the_mcp_server`, `tests/docker/test_compose_stack.py::test_running_the_init_job_again_changes_nothing` |
+| environment variables documented | `tests/unit/test_docker_config.py::test_every_setting_is_documented_in_env_example`, `tests/unit/test_docker_config.py::test_every_environment_variable_is_a_real_setting` |
+| never commit API keys | `tests/unit/test_docker_config.py::test_no_secret_is_written_in_a_compose_file`, `tests/unit/test_docker_config.py::test_the_build_context_is_an_allowlist`, `tests/unit/test_generate_secrets.py` |
+| container security | `tests/docker/test_compose_stack.py::test_containers_run_unprivileged_on_a_read_only_file_system`, `tests/docker/test_compose_stack.py::test_the_mcp_server_and_the_database_are_not_open_to_the_network` |
 
 **Voice tests (spec §16)**
 
@@ -200,8 +213,8 @@ $ python -m scripts.mutation_test
   KILLED    logs-unredacted             API keys and passwords typed by a customer are written to logs
   KILLED    ui-html-sink                agent answers and attack strings are rendered as HTML (XSS)
   KILLED    eval-isolation-scorer       the evaluation reports 100% data isolation whatever leaked
-  ... (26 in total)
-Mutation score: 26/26 killed
+  ... (30 in total, incl. container mistakes such as a root user or a published MCP port)
+Mutation score: 30/30 killed
 ```
 
 The mutants are curated, not generated: a generic tool (mutmut) makes thousands of mutants and

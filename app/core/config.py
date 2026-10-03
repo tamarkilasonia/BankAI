@@ -8,6 +8,7 @@ Settings are added phase by phase; only settings that are actually used by the
 code base live here.
 """
 
+import os
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal
@@ -207,5 +208,10 @@ def get_settings() -> Settings:
 
     Cached so the environment is parsed once. Tests that change environment
     variables must call ``get_settings.cache_clear()``.
+
+    ``SECRETS_DIR`` (set in the Docker containers) names a directory of secret files,
+    one per setting (``mcp_auth_secret``, ...) - the Docker secrets convention. Values
+    from the environment or ``.env`` still take precedence.
     """
-    return Settings()
+    # _secrets_dir is a pydantic-settings init option that mypy does not see.
+    return Settings(_secrets_dir=os.environ.get("SECRETS_DIR") or None)  # type: ignore[call-arg]

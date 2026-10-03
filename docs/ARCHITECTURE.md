@@ -157,15 +157,18 @@ BankAI/
 ├── alembic/          Database migrations
 ├── knowledge_base/   MOCK bank policy documents (Markdown) for RAG
 ├── frontend/         Static HTML/CSS/JS modules: chat, microphone, evaluation dashboard (served at /ui/)
-├── scripts/          seed_db, ingest_knowledge_base, run_evaluation
+├── scripts/          seed_db, ingest_knowledge_base, run_evaluation, run_safety_suite, mutation_test, generate_secrets, ...
 ├── tests/
 │   ├── unit/         Fast, isolated (SQLite, fakes)
 │   ├── integration/  Real PostgreSQL, MCP in-memory transport, API + DB
 │   ├── safety/       Prompt-injection suite, data-leakage and authorization attacks
 │   ├── evaluation/   Tests of the evaluation framework itself
-│   └── voice/        STT/TTS providers, audio validation, error paths
-├── docs/             Architecture and design notes
-├── Dockerfile, docker-compose.yml
+│   ├── property/     Property-based tests (Hypothesis): disguised attacks, grounding, tool fuzzing
+│   ├── voice/        STT/TTS providers, audio validation, error paths
+│   ├── api/, frontend/, llm/   HTTP API, web UI (incl. headless Chrome), live-LLM tests
+│   └── docker/       The real Compose stack, built and tested from outside
+├── docs/             Architecture, testing strategy (TESTING.md), containers (DOCKER.md)
+├── Dockerfile, docker-compose.yml (+ .ollama.yml / .voice.yml add-ons), .dockerignore
 └── .github/workflows/ci.yml
 ```
 
@@ -189,8 +192,8 @@ or the offline provider.
 | 8 | FastAPI | All endpoints, mock login, request-ID middleware, error handlers, OpenAPI docs | ✅ Done |
 | 9 | Frontend | Chat, microphone, audio playback, evaluation dashboard | ✅ Done |
 | 10 | Testing | Fill gaps: security suite, voice, end-to-end; ≥80% coverage | ✅ Done |
-| 11 | Docker | Dockerfile, compose: backend, mcp-server, db (pgvector), migrate/seed job | Next |
-| 12 | CI/CD | Lint → type-check → unit → integration (PG service) → coverage → image build | |
+| 11 | Docker | Dockerfile, compose: backend, mcp-server, database (pgvector), init job | ✅ Done |
+| 12 | CI/CD | Lint → type-check → unit → integration (PG service) → coverage → image build | Next |
 | 13 | Docs | README, architecture diagrams, INTERVIEW.md | |
 
 Testing is not deferred to phase 10: every phase ships with its tests.
@@ -701,7 +704,7 @@ fixed; the first is now also covered by the smoke test's per-view checks.
 | Hallucinated fees/rates/amounts | Wrong financial info | Answers only from tool results/documents; numeric-claim verification against context; claims checked per sentence; "not enough information" path. Phase 10's scripted-LLM tests found and closed three holes (borrowed claims, leading questions, small amounts) |
 | Georgian STT/TTS quality | Poor voice UX in Georgian | **Measured:** Georgian TTS works (Piper), Georgian STT does not (Whisper small/large-v3-turbo); the pipeline never acts on it and asks to repeat or type (section 10) |
 | pgvector not in the local Homebrew PostgreSQL 15 | Phase 4 blocked locally | **Resolved:** pgvector 0.8.6 built from source for PG15; Docker uses `pgvector/pgvector:pg16` |
-| Docker not installed on the development machine | Phase 11 not verifiable locally | Install Docker Desktop / OrbStack; CI builds the image regardless |
+| Docker not installed on the development machine | Phase 11 not verifiable locally | **Resolved:** Docker Desktop installed; the stack is built and tested for real (`pytest -m docker`) |
 | SQLite (unit) vs PostgreSQL (prod) differences | Bugs hidden in unit tests | PostgreSQL integration tests in CI (`REQUIRE_INTEGRATION_DB=1`) |
 | Evaluation cost/latency with a real LLM | Expensive runs | Small default model, offline baseline, run subsets by category |
 | "This month" depends on time zone and seed date | Off-by-one-day answers | Bank time zone (UTC+4) for periods; seed `--anchor`; oracle uses the same period logic |
@@ -725,3 +728,30 @@ They found twelve problems: three hallucination holes in grounding, six gaps in 
 normalizer and action detection, a missing authorization layer for single-account queries (the docs promised two
 layers; there was one), a fuzz test that never reached the code it was meant to test, and a
 test-setup problem that lost audit rows under concurrency.
+
+---
+
+## 15. Containers (phase 11)
+
+`docker compose up --build` starts the whole system; details in [DOCKER.md](DOCKER.md).
+One image (multi-stage, non-root, read-only file system, health check) runs three roles:
+
+* **`init`** - a one-shot job on every start: generate missing secrets into a volume →
+  `alembic upgrade head` → seed the MOCK bank if the database is empty → index the knowledge base;
+* **`mcp-server`** - the tools over MCP/HTTP, reachable only inside the compose network;
+* **`backend`** - FastAPI, web UI and agent, with `MCP_TRANSPORT=http`: the deployed topology
+  really separates the agent from the tools, as the architecture describes.
+
+Plus `database` (pgvector/pgvector:pg16). Compose starts them in dependency order using health
+checks. The default mode is offline; `docker-compose.ollama.yml` (LLM and embeddings from Ollama on
+the host - Docker on a Mac has no GPU access) and `docker-compose.voice.yml` (Whisper and Piper,
+with the models mounted read-only) are add-ons.
+
+**Secrets**: none in the repository or the image. They are generated on first start (or taken
+from `.env`), stored as 0600 files in a volume, and read through `SECRETS_DIR`
+(pydantic-settings' secrets directory).
+
+**Found by building the image**: `aiosqlite`, needed by the evaluation runner at run time, was a
+development dependency only. Locally nothing failed; in the image "Run evaluation" would have
+crashed. Tests: `tests/unit/test_docker_config.py` (rules, wiring, documentation - no Docker
+needed) and `tests/docker/test_compose_stack.py` (the real stack, from outside).

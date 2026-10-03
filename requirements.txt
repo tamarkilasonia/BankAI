@@ -15,6 +15,7 @@ pydantic-settings==2.15.0
 SQLAlchemy[asyncio]==2.1.1
 asyncpg==0.31.0                 # async PostgreSQL driver
 alembic==1.20.0                 # schema migrations
+aiosqlite==0.22.1               # the evaluation's frozen MOCK bank is an in-memory SQLite database
 pgvector==0.5.0                 # SQLAlchemy type for the pgvector extension (RAG, phase 4)
 
 # --- AI / agent ---

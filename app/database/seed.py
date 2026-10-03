@@ -590,6 +590,11 @@ async def clear_mock_data(session: AsyncSession) -> None:
         await session.execute(delete(model))
 
 
+async def has_mock_data(session: AsyncSession) -> bool:
+    """True once the database holds customers (``seed_db --if-empty`` then does nothing)."""
+    return bool(await session.scalar(select(func.count()).select_from(User)))
+
+
 async def seed_database(
     session: AsyncSession,
     *,
@@ -604,7 +609,7 @@ async def seed_database(
     """
     if reset:
         await clear_mock_data(session)
-    elif await session.scalar(select(func.count()).select_from(User)):
+    elif await has_mock_data(session):
         raise SeedError("Database already contains users. Re-run with --reset to replace the mock data.")
 
     anchor = anchor or datetime.now(UTC)

@@ -64,6 +64,7 @@ markers = [
     "llm: calls a real LLM server (local Ollama by default); skipped when none is reachable",
     "voice: runs the local Whisper/Piper models; skipped when they are not installed",
     "ui: drives the web UI in headless Chrome; skipped when Chrome or node is missing",
+    "docker: builds and runs the Docker Compose stack; skipped without Docker (REQUIRE_DOCKER=1 fails instead)",
 ]
 filterwarnings = [
     "error",
