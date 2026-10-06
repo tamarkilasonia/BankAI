@@ -16,6 +16,7 @@ on 246 labelled cases, and a security suite attacks it with 57 prompt injections
 
 ![The chat: a transfer is only recorded as a MOCK request after explicit confirmation, and an injection attack is refused](docs/images/chat.png)
 
+
 | At a glance | |
 |---|---|
 | Agent | LangGraph state machine with 13 nodes: rules first, the LLM where rules are unsure |
