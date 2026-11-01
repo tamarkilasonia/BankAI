@@ -2,27 +2,27 @@
 # Versions are pinned exactly so local, CI and Docker builds are reproducible.
 
 # --- Web API ---
-fastapi==0.142.2
+fastapi==0.162.0
 uvicorn[standard]==0.54.0
 python-multipart==0.0.32        # multipart/form-data uploads (voice audio)
 httpx==0.28.1
 
 # --- Configuration & validation ---
-pydantic==2.13.5
-pydantic-settings==2.15.0
+pydantic==2.14.2
+pydantic-settings==2.16.2
 
 # --- Database ---
-SQLAlchemy[asyncio]==2.1.1
-asyncpg==0.31.0                 # async PostgreSQL driver
-alembic==1.20.0                 # schema migrations
+SQLAlchemy[asyncio]==2.1.6
+asyncpg==0.32.0                 # async PostgreSQL driver
+alembic==1.20.1                 # schema migrations
 aiosqlite==0.22.1               # the evaluation's frozen MOCK bank is an in-memory SQLite database
-pgvector==0.5.0                 # SQLAlchemy type for the pgvector extension (RAG, phase 4)
+pgvector==0.5.1                 # SQLAlchemy type for the pgvector extension (RAG, phase 4)
 
 # --- AI / agent ---
-openai==3.22.1                  # chat, embeddings, speech-to-text, text-to-speech
-langgraph==1.2.12               # agent workflow graph
-mcp==2.2.0                      # Model Context Protocol server + client
-numpy==2.5.3                    # used by pgvector; pinned for reproducible builds
+openai==3.41.0                  # chat, embeddings, speech-to-text, text-to-speech
+langgraph==1.2.18               # agent workflow graph
+mcp==2.3.0                      # Model Context Protocol server + client
+numpy==2.5.4                    # used by pgvector; pinned for reproducible builds
 
 # --- Security ---
 PyJWT==2.15.1                   # signed tokens for mock login and agent -> MCP identity
