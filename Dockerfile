@@ -12,7 +12,7 @@
 # The base image is written out in both stages (not an ARG) so that Dependabot can update it.
 
 # --- 1. dependencies ---------------------------------------------------------------------
-FROM python:3.12.15-slim-bookworm AS builder
+FROM python:3.12.16-slim-bookworm AS builder
 
 ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PIP_ROOT_USER_ACTION=ignore
@@ -30,7 +30,7 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     && pip uninstall --yes pip
 
 # --- 2. runtime -----------------------------------------------------------------------------
-FROM python:3.12.15-slim-bookworm AS runtime
+FROM python:3.12.16-slim-bookworm AS runtime
 
 LABEL org.opencontainers.image.title="BankAI" \
       org.opencontainers.image.description="Agentic banking voice assistant prototype - MOCK data only"
