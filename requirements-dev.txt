@@ -2,16 +2,16 @@
 -r requirements.txt
 
 # --- Testing ---
-pytest==9.1.1
-pytest-asyncio==1.4.0
+pytest==9.2.0
+pytest-asyncio==1.4.1
 pytest-cov==7.1.0
-hypothesis==6.168.3             # property-based tests (tests/property)
-hypothesis-jsonschema==0.23.1   # generates well-formed tool calls from the MCP JSON schemas
+hypothesis==6.170.13             # property-based tests (tests/property)
+hypothesis-jsonschema==0.23.2   # generates well-formed tool calls from the MCP JSON schemas
 PyYAML==6.0.3                   # reads the compose files in tests/unit/test_docker_config.py
 pytest-randomly==5.0.0          # random test order on every run: catches hidden coupling (-p no:randomly to turn off)
 
 # --- Code quality ---
-ruff==0.16.9                    # linter + formatter
-mypy==2.3.1                     # static type checking
+ruff==0.17.3                    # linter + formatter
+mypy==2.4.1                     # static type checking
 actionlint-py==1.7.12.25        # lints the GitHub Actions workflows (actionlint)
 shellcheck-py==0.11.0.1         # ... including the shell scripts inside them
